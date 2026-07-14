@@ -1,0 +1,760 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@variant dark (&:where(.dark, .dark *));
+
+/* Base custom modern styles and smooth animations */
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-color: #f8fafc;
+    color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Modern Rounded Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Fade in smooth animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ================= PRESTIGE TWILIGHT DARK MODE IMPLEMENTATION ================= */
+.dark body {
+  background-color: #0d1321 !important;
+  color: #e2e8f0 !important;
+}
+
+/* App Main Slate Override */
+.dark #outlook-app-frame {
+  background-color: #0b0f19 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Ribbon & Navigation Overrides */
+.dark #outlook-ribbon, 
+.dark #outlook-ribbon > div {
+  background-color: #0f172a !important;
+  color: #f1f5f9 !important;
+  border-color: #1e293b !important;
+}
+
+.dark #outlook-ribbon button {
+  color: #cbd5e1 !important;
+}
+
+.dark #outlook-ribbon button:hover {
+  background-color: #1e293b !important;
+}
+
+/* Verbindung testen Button Contrast & Visibility Fix */
+#btn-test-verbindung {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+#btn-test-verbindung:hover {
+  background-color: #e2e8f0 !important;
+}
+
+#btn-test-verbindung svg {
+  color: #0078d4 !important;
+}
+
+.dark #btn-test-verbindung {
+  background-color: #1e293b !important;
+  color: #f1f5f9 !important;
+  border-color: #334155 !important;
+}
+
+.dark #btn-test-verbindung:hover {
+  background-color: #334155 !important;
+}
+
+.dark #btn-test-verbindung svg {
+  color: #38bdf8 !important;
+}
+
+/* QuickSteps buttons dark mode readability fix */
+.dark .quickstep-btn {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+}
+
+.dark .quickstep-btn span {
+  color: #f1f5f9 !important;
+}
+
+.dark .quickstep-btn:hover {
+  background-color: #2e3d52 !important;
+}
+
+.dark #outlook-ribbon .border-b,
+.dark #outlook-ribbon .border-t {
+  border-color: #1e293b !important;
+}
+
+/* Navigation Rail Container */
+.dark #navigation-rail {
+  background-color: #090d16 !important;
+  border-color: #1e293b !important;
+}
+
+/* Lower Bar Status Bar */
+.dark #outlook-statusbar {
+  background-color: #0d1321 !important;
+  border-top-color: #1e293b !important;
+  color: #94a3b8 !important;
+}
+
+/* Folder Tree Sidebar */
+.dark #folder-tree-sidebar {
+  background-color: #0b0f19 !important;
+  border-color: #1e293b !important;
+  color: #cbd5e1 !important;
+}
+
+.dark #folder-tree-sidebar button:hover,
+.dark #folder-tree-sidebar .hover\:bg-slate-100 {
+  background-color: #1e293b !important;
+}
+
+/* Middle List Items Container (ItemList.tsx) */
+.dark #item-list-container {
+  background-color: #0d1321 !important;
+  border-color: #1e293b !important;
+}
+
+/* Universal Search Header inside List Items */
+.dark #item-list-container h1,
+.dark #item-list-container .bg-white,
+.dark #item-list-container .bg-slate-50,
+.dark #item-list-container .h-12,
+.dark #item-list-container .h-9 {
+  background-color: #0d1321 !important;
+  border-color: #1e293b !important;
+}
+
+.dark #item-list-container .bg-slate-50\/50 {
+  background-color: #0d1321 !important;
+}
+
+/* Universal search bar input */
+.dark #outlook-universal-search {
+  background-color: #1a2333 !important;
+  color: #f8fafc !important;
+  border-color: #2a3754 !important;
+}
+
+/* Cards inside ItemList */
+.dark #item-list-container [id^="email-item-"],
+.dark #item-list-container [id^="calendar-item-"],
+.dark #item-list-container [id^="contact-item-"],
+.dark #item-list-container [id^="task-item-"] {
+  background-color: #141a29 !important;
+  border-color: #222d42 !important;
+  color: #cbd5e1 !important;
+}
+
+.dark #item-list-container [id^="email-item-"]:hover,
+.dark #item-list-container [id^="calendar-item-"]:hover,
+.dark #item-list-container [id^="contact-item-"]:hover,
+.dark #item-list-container [id^="task-item-"]:hover {
+  background-color: #1d263b !important;
+  border-color: #31405c !important;
+}
+
+/* Active Selected cards */
+.dark #item-list-container .bg-white {
+  background-color: #141a29 !important;
+}
+
+.dark #item-list-container .bg-white[id^="email-item-"],
+.dark #item-list-container .bg-white[id^="calendar-item-"],
+.dark #item-list-container .bg-white[id^="contact-item-"],
+.dark #item-list-container .bg-white[id^="task-item-"] {
+  background-color: #141a29 !important;
+}
+
+.dark #item-list-container [id^="email-item-"].bg-white,
+.dark #item-list-container [id^="calendar-item-"].bg-white,
+.dark #item-list-container [id^="contact-item-"].bg-white,
+.dark #item-list-container [id^="task-item-"].bg-white {
+  background-color: #141a29 !important;
+}
+
+/* Active Highlight selected states styles */
+.dark #item-list-container .border-\[\#0078d4\],
+.dark #item-list-container .border-\[\#107c41\],
+.dark #item-list-container .border-amber-500,
+.dark #item-list-container .border-purple-500 {
+  background-color: #1d2b45 !important;
+  border-width: 1px !important;
+}
+
+.dark #item-list-container .border-\[\#0078d4\] { border-color: #0078d4 !important; }
+.dark #item-list-container .border-\[\#107c41\] { border-color: #107c41 !important; }
+.dark #item-list-container .border-amber-500 { border-color: #f59e0b !important; }
+.dark #item-list-container .border-purple-500 { border-color: #a855f7 !important; }
+
+/* Text in ItemList cards */
+.dark #item-list-container .text-slate-900,
+.dark #item-list-container .text-slate-800,
+.dark #item-list-container .text-slate-705,
+.dark #item-list-container .text-slate-700 {
+  color: #f8fafc !important;
+}
+
+.dark #item-list-container .text-slate-600,
+.dark #item-list-container .text-slate-500,
+.dark #item-list-container .text-slate-450,
+.dark #item-list-container .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+/* Reading Pane Views (ReadingPane.tsx) */
+.dark #mail-reading-pane,
+.dark #calendar-reading-pane,
+.dark #contact-details-pane,
+.dark #task-details-pane,
+.dark #new-email-writer,
+.dark #no-mail-pane,
+.dark #no-contact-pane,
+.dark #no-task-pane {
+  background-color: #0b0f19 !important;
+  color: #e2e8f0 !important;
+  border-color: #1e293b !important;
+}
+
+/* Non-selected placeholders */
+.dark #no-mail-pane,
+.dark #no-contact-pane,
+.dark #no-task-pane {
+  background-color: #0b0f19 !important;
+}
+
+/* Reading pane header bar sections */
+.dark #mail-reading-pane > .p-6,
+.dark #calendar-reading-pane > .p-6,
+.dark #contact-details-pane > .p-6,
+.dark #task-details-pane > .p-6,
+.dark #new-email-writer > div:first-of-type,
+.dark #mail-reading-pane .bg-slate-50\/25,
+.dark #calendar-reading-pane .bg-slate-50\/30,
+.dark #contact-details-pane .bg-slate-50\/30,
+.dark #task-details-pane .bg-slate-50\/25 {
+  background-color: #101626 !important;
+  border-color: #1e293b !important;
+}
+
+/* Body / content blocks inside reading panes */
+.dark #mail-reading-pane .p-6:not(:first-of-type),
+.dark #calendar-reading-pane .p-6:not(:first-of-type),
+.dark #contact-details-pane .p-6:not(:first-of-type),
+.dark #task-details-pane .p-6:not(:first-of-type),
+.dark #contact-details-pane .bg-white,
+.dark #task-details-pane .bg-white {
+  background-color: #0b0f19 !important;
+  border-color: #1e293b !important;
+}
+
+/* Attachment bar inside ReadingPane */
+.dark #mail-reading-pane .bg-\[\#fbfbfb\],
+.dark #mail-reading-pane .border-slate-200 {
+  background-color: #101626 !important;
+  border-color: #1e293b !important;
+}
+
+/* Email attachment buttons inside attachments bar */
+.dark #mail-reading-pane .bg-white.border.border-slate-200 {
+  background-color: #1a2333 !important;
+  border-color: #334155 !important;
+  color: #0078d4 !important;
+}
+
+.dark #mail-reading-pane .bg-white.border.border-slate-200:hover {
+  background-color: #222d42 !important;
+}
+
+/* Background layout containers inside ReadingPane */
+.dark #mail-reading-pane .bg-slate-50\/50,
+.dark #calendar-reading-pane .bg-slate-50,
+.dark #contact-details-pane .bg-slate-50 {
+  background-color: #101626 !important;
+}
+
+/* Inline code or monospaced tags */
+.dark .bg-slate-100,
+.dark .bg-slate-250,
+.dark .bg-slate-200 {
+  background-color: #1a2333 !important;
+  color: #f8fafc !important;
+}
+
+/* Custom cards or detail tables */
+.dark #contact-details-pane .bg-white,
+.dark #task-details-pane .bg-white,
+.dark #calendar-reading-pane .bg-white {
+  background-color: #0b0f19 !important;
+}
+
+/* Text overrides in Reading panes */
+.dark #mail-reading-pane .text-slate-900,
+.dark #mail-reading-pane .text-slate-850,
+.dark #mail-reading-pane .text-slate-800,
+.dark #mail-reading-pane .text-slate-705,
+.dark #calendar-reading-pane .text-slate-900,
+.dark #calendar-reading-pane .text-slate-800,
+.dark #contact-details-pane .text-slate-950,
+.dark #contact-details-pane .text-slate-800,
+.dark #task-details-pane .text-slate-950,
+.dark #task-details-pane .text-slate-800,
+.dark #task-details-pane strong.text-slate-800 {
+  color: #f1f5f9 !important;
+}
+
+.dark #mail-reading-pane .text-slate-600,
+.dark #mail-reading-pane .text-slate-500,
+.dark #mail-reading-pane .text-slate-400,
+.dark #calendar-reading-pane .text-slate-600,
+.dark #calendar-reading-pane .text-slate-500,
+.dark #calendar-reading-pane .text-slate-400,
+.dark #contact-details-pane .text-slate-600,
+.dark #contact-details-pane .text-slate-500,
+.dark #contact-details-pane .text-slate-400,
+.dark #task-details-pane .text-slate-600,
+.dark #task-details-pane .text-slate-500,
+.dark #task-details-pane .text-slate-400 {
+  color: #a0aec0 !important;
+}
+
+/* Calendar Days Grid */
+.dark #calendar-reading-pane .grid-cols-7,
+.dark #calendar-reading-pane .bg-slate-50 {
+  background-color: #101626 !important;
+  border-color: #1e293b !important;
+}
+
+.dark #calendar-reading-pane .grid-cols-7 > div {
+  background-color: #141a29 !important;
+  color: #e2e8f0 !important;
+  border-color: #1e293b !important;
+}
+
+.dark #calendar-reading-pane .grid-cols-7 > div:hover {
+  background-color: #222d42 !important;
+}
+
+/* Task details block elements */
+.dark #task-details-pane .bg-slate-50 {
+  background-color: #101626 !important;
+}
+
+.dark #task-details-pane p.text-slate-700.whitespace-pre-line {
+  background-color: #101626 !important;
+  color: #cbd5e1 !important;
+  border-color: #1e293b !important;
+}
+
+/* Rich Email Body Content inside ReadingPane */
+.dark .rich-email-content,
+.dark .rich-email-content * {
+  color: #f1f5f9 !important;
+}
+
+/* Context menu overlay */
+.dark #email-context-menu {
+  background-color: #101626 !important;
+  border-color: #2a3754 !important;
+  color: #cbd5e1 !important;
+}
+
+.dark #email-context-menu button {
+  color: #cbd5e1 !important;
+}
+
+.dark #email-context-menu button:hover {
+  background-color: #1b263b !important;
+  color: #f1f5f9 !important;
+}
+
+/* Notes View Specifics */
+.dark #notes-view-root,
+.dark #notes-sidebar-tree {
+  background-color: #0b0f19 !important;
+  border-color: #1e293b !important;
+}
+
+.dark #notes-sidebar-tree .bg-white {
+  background-color: #141a29 !important;
+  color: #f1f5f9 !important;
+}
+
+.dark #notes-sidebar-tree .text-slate-600 {
+  color: #94a3b8 !important;
+}
+
+.dark #notes-sidebar-tree .hover\:bg-slate-200\/40:hover {
+  background-color: #222d42 !important;
+}
+
+.dark #notes-canvas-area {
+  background-color: #0d1321 !important;
+}
+
+.dark #notes-view-root .h-12.bg-white,
+.dark #notes-view-root .bg-white {
+  background-color: #101626 !important;
+  border-color: #1e293b !important;
+}
+
+.dark #notes-view-root .bg-slate-50 {
+  background-color: #101626 !important;
+  color: #94a3b8 !important;
+}
+
+.dark #notes-editor-overlay .bg-white {
+  background-color: #141a29 !important;
+}
+
+/* Options dialog panel (uniquemail settings modal) */
+.dark #outlook-options-modal > div {
+  background-color: #0f172a !important;
+  color: #f1f5f9 !important;
+  border-color: #1e293b !important;
+}
+
+.dark #outlook-options-modal .bg-white,
+.dark #outlook-options-modal .bg-slate-50 {
+  background-color: #1e293b !important;
+}
+
+.dark #outlook-options-modal .border-slate-200,
+.dark #outlook-options-modal .border-slate-100 {
+  border-color: #334155 !important;
+}
+
+.dark #outlook-options-modal .text-slate-900,
+.dark #outlook-options-modal .text-slate-800 {
+  color: #f1f5f9 !important;
+}
+
+/* General Layout Fallback Classes */
+.dark .bg-white {
+  background-color: #141a29 !important;
+}
+
+.dark .text-slate-800 {
+  color: #f1f5f9 !important;
+}
+
+/* Form Formular Inputs (Everywhere in app) */
+.dark input, 
+.dark textarea, 
+.dark select {
+  background-color: #141a29 !important;
+  color: #f1f5f9 !important;
+  border-color: #2a3754 !important;
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: #0078d4 !important;
+}
+
+/* Custom dark scrollbars */
+.dark ::-webkit-scrollbar-thumb {
+  background: #2a3754;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #3c4f77;
+}
+
+
+/* Unique Mail 0.2.13 layout containment */
+#outlook-ribbon {
+  isolation: isolate;
+}
+
+#outlook-ribbon > div:first-child {
+  min-height: 48px;
+}
+
+#outlook-ribbon > div:nth-child(2) button,
+#outlook-ribbon > div:nth-child(3) > div {
+  flex: 0 0 auto;
+}
+
+#outlook-ribbon button,
+#outlook-options-modal button {
+  white-space: nowrap;
+}
+
+#outlook-options-modal > div {
+  width: min(920px, calc(100vw - 32px));
+  height: min(680px, calc(100vh - 32px));
+}
+
+#outlook-options-modal input,
+#outlook-options-modal select,
+#outlook-options-modal textarea {
+  min-width: 0;
+}
+
+#outlook-options-modal .grid > div {
+  min-width: 0;
+}
+
+#item-list-container [id^="email-item-"] {
+  contain: layout paint;
+}
+
+#item-list-container [id^="email-item-"] button {
+  line-height: 1;
+}
+
+#folder-tree-sidebar button {
+  min-height: 0;
+}
+
+.rich-email-content {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  isolation: isolate;
+  contain: layout paint;
+  overflow-wrap: anywhere;
+}
+
+.rich-email-content,
+.rich-email-content * {
+  box-sizing: border-box;
+}
+
+.rich-email-content table,
+.rich-email-content tbody,
+.rich-email-content tr,
+.rich-email-content td,
+.rich-email-content div,
+.rich-email-content section,
+.rich-email-content article {
+  max-width: 100% !important;
+}
+
+.rich-email-content img,
+.rich-email-content video,
+.rich-email-content iframe {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+.rich-email-content iframe {
+  min-height: 240px;
+  border: 0;
+}
+/* ================= 0.3.29 PERFORMANCE + DARKMODE READABILITY PASS ================= */
+.dark #outlook-ribbon,
+.dark #outlook-ribbon > div,
+.dark #outlook-ribbon button,
+.dark #outlook-ribbon span,
+.dark #outlook-ribbon p {
+  color: #dbeafe !important;
+  opacity: 1 !important;
+}
+
+.dark #outlook-ribbon svg {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+.dark #outlook-ribbon button:hover,
+.dark #outlook-ribbon button:focus-visible {
+  background-color: #1d2a44 !important;
+  color: #ffffff !important;
+}
+
+.dark #item-list-container,
+.dark #item-list-container .bg-slate-50\/50,
+.dark #item-list-container .bg-slate-50,
+.dark #item-list-container .h-12,
+.dark #item-list-container .h-10 {
+  background-color: #0a1020 !important;
+  color: #dbeafe !important;
+}
+
+.dark #item-list-container [id^="email-item-"] {
+  background-color: #111a2d !important;
+  border-color: #2a3a58 !important;
+  color: #dbeafe !important;
+  opacity: 1 !important;
+}
+
+.dark #item-list-container [id^="email-item-"] * {
+  opacity: 1 !important;
+}
+
+.dark #item-list-container [id^="email-item-"]:hover {
+  background-color: #17233a !important;
+  border-color: #3b82f6 !important;
+}
+
+.dark #item-list-container [id^="email-item-"].border-\[\#0078d4\],
+.dark #item-list-container [id^="email-item-"].border-amber-500,
+.dark #item-list-container [id^="email-item-"][class*="border-[#0078d4]"] {
+  background-color: #203456 !important;
+  border-color: #38bdf8 !important;
+  box-shadow: inset 3px 0 0 #38bdf8 !important;
+}
+
+.dark #item-list-container [id^="email-item-"] .text-slate-900,
+.dark #item-list-container [id^="email-item-"] .text-slate-800,
+.dark #item-list-container [id^="email-item-"] .text-slate-700,
+.dark #item-list-container [id^="email-item-"] .text-slate-600 {
+  color: #f8fafc !important;
+}
+
+.dark #item-list-container [id^="email-item-"] .text-slate-500,
+.dark #item-list-container [id^="email-item-"] .text-slate-450,
+.dark #item-list-container [id^="email-item-"] .text-slate-400 {
+  color: #b6c4d8 !important;
+}
+
+.dark #mail-reading-pane {
+  background-color: #07101f !important;
+  color: #e5edf8 !important;
+}
+
+.dark #mail-reading-pane > div,
+.dark #mail-reading-pane .border-b,
+.dark #mail-reading-pane .border-t {
+  border-color: #263650 !important;
+}
+
+.dark #mail-reading-pane .text-slate-900,
+.dark #mail-reading-pane .text-slate-850,
+.dark #mail-reading-pane .text-slate-800,
+.dark #mail-reading-pane .text-slate-700 {
+  color: #f8fafc !important;
+}
+
+.dark #mail-reading-pane .text-slate-600,
+.dark #mail-reading-pane .text-slate-500,
+.dark #mail-reading-pane .text-slate-400 {
+  color: #bac7d8 !important;
+}
+
+.dark #mail-reading-pane .bg-amber-50,
+.dark #mail-reading-pane .bg-yellow-50,
+.dark #mail-reading-pane .bg-orange-50 {
+  background-color: #3b2507 !important;
+  border-color: #f59e0b !important;
+  color: #ffedd5 !important;
+}
+
+.dark #mail-reading-pane .bg-red-50 {
+  background-color: #3a0d12 !important;
+  border-color: #ef4444 !important;
+  color: #fee2e2 !important;
+}
+
+.dark #mail-reading-pane .bg-emerald-50 {
+  background-color: #062e22 !important;
+  border-color: #10b981 !important;
+  color: #d1fae5 !important;
+}
+
+.dark #mail-reading-pane .bg-amber-50 *,
+.dark #mail-reading-pane .bg-yellow-50 *,
+.dark #mail-reading-pane .bg-orange-50 *,
+.dark #mail-reading-pane .bg-red-50 *,
+.dark #mail-reading-pane .bg-emerald-50 * {
+  color: inherit !important;
+}
+
+.dark #mail-reading-pane .bg-amber-50 button,
+.dark #mail-reading-pane .bg-yellow-50 button,
+.dark #mail-reading-pane .bg-orange-50 button,
+.dark #mail-reading-pane .bg-red-50 button,
+.dark #mail-reading-pane .bg-emerald-50 button {
+  background-color: #101827 !important;
+  border-color: #475569 !important;
+  color: #f8fafc !important;
+}
+
+.dark #mail-reading-pane .bg-amber-50 button:hover,
+.dark #mail-reading-pane .bg-yellow-50 button:hover,
+.dark #mail-reading-pane .bg-orange-50 button:hover,
+.dark #mail-reading-pane .bg-red-50 button:hover,
+.dark #mail-reading-pane .bg-emerald-50 button:hover {
+  background-color: #1e293b !important;
+}
+
+.dark #mail-reading-pane .rich-email-content {
+  background-color: #101827 !important;
+  color: #e5edf8 !important;
+  border: 1px solid #263650 !important;
+  border-radius: 10px !important;
+  padding: 14px !important;
+}
+
+.dark #mail-reading-pane .rich-email-content :where(div, section, article, header, footer, main, table, tbody, thead, tfoot, tr, td, th, p, span, font, strong, b, em, i, small, h1, h2, h3, h4, h5, h6, ul, ol, li, center) {
+  background-color: transparent !important;
+  color: #e5edf8 !important;
+  border-color: #334155 !important;
+}
+
+.dark #mail-reading-pane .rich-email-content a,
+.dark #mail-reading-pane .rich-email-content a * {
+  color: #7dd3fc !important;
+  text-decoration-color: #7dd3fc !important;
+}
+
+.dark #mail-reading-pane .rich-email-content img {
+  background-color: #ffffff !important;
+  border-radius: 4px !important;
+}
+
+.dark #mail-reading-pane .rich-email-content :where(blockquote, pre, code) {
+  background-color: #0b1220 !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}

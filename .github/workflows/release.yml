@@ -1,0 +1,71 @@
+name: Build and publish Unique Mail
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run lint
+
+      - name: Build Windows installer
+        run: npm run dist:win
+
+      - name: Create secure update feed
+        id: metadata
+        shell: pwsh
+        run: |
+          $package = Get-Content -Raw package.json | ConvertFrom-Json
+          $version = [string]$package.version
+          $installerName = "Unique Mail Setup $version.exe"
+          $installerPath = Join-Path release $installerName
+          if (-not (Test-Path -LiteralPath $installerPath)) {
+            throw "Installer not found: $installerPath"
+          }
+          $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $installerPath).Hash
+          $encodedName = [Uri]::EscapeDataString($installerName)
+          $manifest = [ordered]@{
+            version = $version
+            url = "https://github.com/${{ github.repository }}/releases/download/v$version/$encodedName"
+            sha256 = $sha256
+            publishedAt = (Get-Date).ToUniversalTime().ToString('o')
+            notes = "Unique Mail $version"
+          }
+          $manifest | ConvertTo-Json | Set-Content -LiteralPath release/latest.json -Encoding utf8
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "installer=$installerPath" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v${{ steps.metadata.outputs.version }}"
+          $installer = "${{ steps.metadata.outputs.installer }}"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $installer release/latest.json --clobber
+          } else {
+            gh release create $tag $installer release/latest.json --title "Unique Mail ${{ steps.metadata.outputs.version }}" --generate-notes
+          }

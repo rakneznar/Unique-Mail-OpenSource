@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+release/
+release-*/
+prepackaged-*/
+coverage/
+UniqueMailData/
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
+*.log
+.env*
+!.env.example
