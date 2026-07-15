@@ -19,6 +19,21 @@
   }
 }
 
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  -webkit-app-region: no-drag;
+}
+
+input:not(:disabled):not([readonly]),
+textarea:not(:disabled):not([readonly]),
+[contenteditable="true"] {
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* Modern Rounded Scrollbars */
 ::-webkit-scrollbar {
   width: 8px;

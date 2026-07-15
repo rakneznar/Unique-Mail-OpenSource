@@ -672,6 +672,14 @@ async function createWindow() {
     }
   });
   mainWindow = win;
+  const focusRenderer = () => {
+    setTimeout(() => {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.focus();
+    }, 0);
+  };
+  win.on('focus', focusRenderer);
+  win.on('show', focusRenderer);
+  win.on('restore', focusRenderer);
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });
@@ -988,7 +996,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.3.34 <span class="unique-version-current">aktuell</span></h3><ul><li>Update-Installer wird nach dem Download direkt und sichtbar gestartet; der fehlerhafte versteckte PowerShell-Start wurde entfernt.</li><li>Der Update-Button pulsiert und wackelt bei verfuegbaren Updates und zeigt den echten Downloadfortschritt als Fuellbalken.</li><li>Ein separater Aufraeumhelfer loescht den Installer erst nach dessen Abschluss und protokolliert den Ablauf.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.3.35 <span class="unique-version-current">aktuell</span></h3><ul><li>Appweiter Fokusfehler bei Eingabefeldern behoben: Fensteraktivierung, Renderer-Fokus und editierbare Felder werden zuverlaessig synchronisiert.</li><li>Spezielle Konto-Eventblocker entfernt; Eingaben sind ausdruecklich als nicht ziehbare Textbereiche markiert.</li><li>Backup-Passwort ist optional: Exporte ohne Passwort enthalten alle Einstellungen, aber keine Kontopasswoerter; kennwortfreie JSON-Dateien lassen sich ohne Passwort importieren.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.3.34</h3><ul><li>Update-Installer wird nach dem Download direkt und sichtbar gestartet; der fehlerhafte versteckte PowerShell-Start wurde entfernt.</li><li>Der Update-Button pulsiert und wackelt bei verfuegbaren Updates und zeigt den echten Downloadfortschritt als Fuellbalken.</li><li>Ein separater Aufraeumhelfer loescht den Installer erst nach dessen Abschluss und protokolliert den Ablauf.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.33</h3><ul><li>Importierte Konten und Einstellungen werden portunabhaengig unter Data/Settings gesichert und vor dem Start der Oberflaeche wiederhergestellt.</li><li>Kontopasswoerter werden mit einem frei waehlbaren Backup-Passwort per AES-256-GCM uebertragbar verschluesselt und auf dem Ziel-PC erneut im Windows-Passwortspeicher abgelegt.</li><li>Import prueft Passwortcontainer und dauerhafte Speicherung; Anzeigenamen, Serveroptionen und Ordnermetadaten bleiben vollstaendiger erhalten.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.32</h3><ul><li>Whitescreen-Ursache beseitigt: jede App-Instanz startet ihren lokalen Server auf einem freien Port; Doppelstarts werden auf das bestehende Fenster umgeleitet.</li><li>Grundlayout erscheint vor grossen Maildaten; Cache, Nachrichtentexte, Versand, Verschieben und Wartungssync laufen priorisiert und nacheinander im Hintergrund.</li><li>React-Fehleransicht statt leerem Fenster sowie GitHub-Releases-Feed und automatischer Release-Workflow ergaenzt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.31</h3><ul><li>Heruntergeladene Updates werden automatisch gestartet und nach Abschluss des Installers aus dem temporaeren Update-Ordner entfernt.</li><li>Optionaler SHA-256-Abgleich schuetzt vor unvollstaendigen oder manipulierten Installer-Downloads.</li><li>Erststarts enthalten keine vordefinierten Ordnerfavoriten mehr; entfernte Favoriten bleiben dauerhaft entfernt.</li></ul></article>',
@@ -1112,7 +1121,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.3.34',
+        '0.3.35',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');
@@ -1277,6 +1286,16 @@ function decryptPortableCredentialBackup(payload, backupPassword) {
 ipcMain.handle('native:export-account-passwords', async (_event, payload) => {
   try {
     const backupPassword = String(payload?.backupPassword || '');
+    if (!backupPassword) {
+      return {
+        ok: true,
+        format: 'unique-mail-credentials-omitted-v1',
+        accountCount: 0,
+        omitted: true,
+        machineBound: false,
+        exportedAt: new Date().toISOString()
+      };
+    }
     if (backupPassword.length < 4) {
       return { ok: false, error: 'Das Backup-Passwort muss mindestens 4 Zeichen lang sein.' };
     }
@@ -1296,6 +1315,11 @@ ipcMain.handle('native:import-account-passwords', async (_event, payload) => {
   try {
     const backup = payload?.backup || payload;
     const backupPassword = String(payload?.backupPassword || '');
+    const explicitlyEmpty = Object.prototype.hasOwnProperty.call(backup || {}, 'accountCount')
+      && Number(backup?.accountCount) === 0;
+    if (!backup || backup?.format === 'unique-mail-credentials-omitted-v1' || explicitlyEmpty) {
+      return { ok: true, count: 0, omitted: true };
+    }
     if (backup?.format === 'unique-mail-portable-credentials-v1') {
       if (backupPassword.length < 4) {
         return { ok: false, error: 'Bitte das beim Export verwendete Backup-Passwort eingeben.' };

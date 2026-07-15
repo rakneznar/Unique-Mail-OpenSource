@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem }
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.3.34';
+const APP_VERSION = '0.3.35';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -98,6 +98,54 @@ export default function App() {
       window.clearInterval(intervalId);
       window.removeEventListener('beforeunload', persist);
       persist();
+    };
+  }, []);
+
+  useEffect(() => {
+    let lastEditableElement: HTMLElement | null = null;
+    const editableSelector = 'input:not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="file"]), textarea, [contenteditable="true"]';
+    const findEditable = (target: EventTarget | null) => target instanceof Element
+      ? target.closest<HTMLElement>(editableSelector)
+      : null;
+    const canFocus = (target: HTMLElement | null) => {
+      if (!target || !target.isConnected) return false;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        return !target.disabled && !target.readOnly;
+      }
+      return target.getAttribute('contenteditable') === 'true';
+    };
+    const focusEditable = (target: HTMLElement) => {
+      if (!canFocus(target) || document.activeElement === target) return;
+      target.focus({ preventScroll: true });
+    };
+    const handleEditablePointer = (event: Event) => {
+      const target = findEditable(event.target);
+      if (!canFocus(target)) return;
+      lastEditableElement = target;
+      focusEditable(target);
+      window.requestAnimationFrame(() => focusEditable(target));
+    };
+    const rememberEditableFocus = (event: FocusEvent) => {
+      const target = findEditable(event.target);
+      if (canFocus(target)) lastEditableElement = target;
+    };
+    const restoreRendererFocus = () => {
+      window.requestAnimationFrame(() => {
+        if (document.activeElement === document.body && canFocus(lastEditableElement)) {
+          focusEditable(lastEditableElement as HTMLElement);
+        }
+      });
+    };
+
+    document.addEventListener('pointerdown', handleEditablePointer, true);
+    document.addEventListener('mousedown', handleEditablePointer, true);
+    document.addEventListener('focusin', rememberEditableFocus, true);
+    window.addEventListener('focus', restoreRendererFocus);
+    return () => {
+      document.removeEventListener('pointerdown', handleEditablePointer, true);
+      document.removeEventListener('mousedown', handleEditablePointer, true);
+      document.removeEventListener('focusin', rememberEditableFocus, true);
+      window.removeEventListener('focus', restoreRendererFocus);
     };
   }, []);
 
@@ -982,17 +1030,20 @@ exit`;
     : [];
 
   const handleExportSecuritySettings = async () => {
-    if (settingsBackupPassword.length < 4) {
-      alert('Bitte ein Backup-Passwort mit mindestens 4 Zeichen eingeben. Es wird zum Import auf einem anderen PC benötigt.');
+    const includeAccountPasswords = settingsBackupPassword.length > 0 || settingsBackupPasswordConfirm.length > 0;
+    if (includeAccountPasswords && settingsBackupPassword.length < 4) {
+      alert('Das optionale Backup-Passwort muss mindestens 4 Zeichen lang sein. Lassen Sie beide Felder leer, wenn keine Kontopasswörter exportiert werden sollen.');
       return;
     }
-    if (settingsBackupPassword !== settingsBackupPasswordConfirm) {
+    if (includeAccountPasswords && settingsBackupPassword !== settingsBackupPasswordConfirm) {
       alert('Die beiden Backup-Passwörter stimmen nicht überein.');
       return;
     }
     const nativeApi = (window as any).uniqueMailNative;
-    const exportedAccountPasswords = await nativeApi?.exportAccountPasswords?.({ backupPassword: settingsBackupPassword }).catch((error: any) => ({ ok: false, error: error?.message || String(error) }));
-    if (!exportedAccountPasswords?.ok) {
+    const exportedAccountPasswords = includeAccountPasswords
+      ? await nativeApi?.exportAccountPasswords?.({ backupPassword: settingsBackupPassword }).catch((error: any) => ({ ok: false, error: error?.message || String(error) }))
+      : null;
+    if (includeAccountPasswords && !exportedAccountPasswords?.ok) {
       alert('Export fehlgeschlagen: ' + (exportedAccountPasswords?.error || 'Kontopasswörter konnten nicht gesichert werden.'));
       return;
     }
@@ -1017,7 +1068,8 @@ exit`;
           imageDownloadDenyList: uniqueSenderList(imageDownloadDenyList),
           blockedSenderList: uniqueSenderList(blockedSenderList),
           appLock: appLockConfig,
-          accountPasswords: exportedAccountPasswords
+          accountPasswordsIncluded: includeAccountPasswords,
+          ...(exportedAccountPasswords ? { accountPasswords: exportedAccountPasswords } : {})
         },
         signatures: {
           signatureActive,
@@ -1050,7 +1102,9 @@ exit`;
     link.click();
     document.body.removeChild(link);
     window.setTimeout(() => URL.revokeObjectURL(url), 250);
-    setSyncStatusText('Einstellungen wurden exportiert: Konten, verschluesselter Passwortspeicher, Signaturen, Kalender, Aufgaben, Notizen, Kategorien, Favoriten und Schutzlisten.');
+    setSyncStatusText(includeAccountPasswords
+      ? 'Einstellungen und verschlüsselte Kontopasswörter wurden exportiert.'
+      : 'Einstellungen wurden ohne Kontopasswörter exportiert.');
   };
 
   const handleImportSecuritySettingsFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1075,12 +1129,19 @@ exit`;
       }
 
       const nativeApi = (window as any).uniqueMailNative;
-      if (settings?.security?.accountPasswords) {
-        if (settingsBackupPassword.length < 4) {
+      const importedPasswordBackup = settings?.security?.accountPasswords;
+      const importedPasswordCountIsDeclared = Object.prototype.hasOwnProperty.call(importedPasswordBackup || {}, 'accountCount');
+      const importedPasswordCount = Number(importedPasswordBackup?.accountCount) || 0;
+      const importedPasswordBackupIsEmpty = importedPasswordBackup?.format === 'unique-mail-credentials-omitted-v1'
+        || (importedPasswordCountIsDeclared && importedPasswordCount === 0);
+      const importContainsPortablePasswords = importedPasswordBackup?.format === 'unique-mail-portable-credentials-v1'
+        && !importedPasswordBackupIsEmpty;
+      if (importedPasswordBackup && !importedPasswordBackupIsEmpty) {
+        if (importContainsPortablePasswords && settingsBackupPassword.length < 4) {
           throw new Error('Bitte vor dem Import das beim Export verwendete Backup-Passwort eingeben.');
         }
         const passwordImport = await nativeApi?.importAccountPasswords?.({
-          backup: settings.security.accountPasswords,
+          backup: importedPasswordBackup,
           backupPassword: settingsBackupPassword
         }).catch((error: any) => ({ ok: false, error: error?.message || String(error) }));
         if (!passwordImport?.ok) {
@@ -1813,15 +1874,8 @@ exit`;
   const [isOptionsSyncing, setIsOptionsSyncing] = useState<boolean>(false);
   const latestOptionsSyncLog = optionsSyncLogs[optionsSyncLogs.length - 1] || '[INFO] Verbindung wird vorbereitet...';
   const latestOptionsSyncStatus = latestOptionsSyncLog.replace(/^\[[^\]]+\]\s*/, '');
-  const stopAccountInputEvent = (event: React.SyntheticEvent<HTMLInputElement>) => event.stopPropagation();
   const accountInputGuards: React.InputHTMLAttributes<HTMLInputElement> = {
-    disabled: false,
-    readOnly: false,
-    spellCheck: false,
-    onPointerDown: stopAccountInputEvent,
-    onMouseDown: stopAccountInputEvent,
-    onClick: stopAccountInputEvent,
-    onKeyDown: stopAccountInputEvent,
+    spellCheck: false
   };
 
   // Dev tab specific section
@@ -4032,14 +4086,14 @@ Julia`,
                       <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <div className="min-w-0">
                           <p className="text-[10.5px] font-extrabold text-slate-800 uppercase tracking-wider">Export / Import</p>
-                          <p className="text-[10px] text-slate-500 leading-4">Konten und Passwörter werden übertragbar verschlüsselt. Für den Import auf einem anderen PC muss dasselbe Backup-Passwort eingegeben werden. Mailinhalte werden nicht exportiert.</p>
+                          <p className="text-[10px] text-slate-500 leading-4">Das Backup-Passwort ist optional. Ohne Passwort werden Konten und Einstellungen, aber keine Kontopasswörter exportiert.</p>
                         </div>
                         <div className="grid min-w-[330px] grid-cols-2 gap-2 shrink-0">
                           <input
                             type="password"
                             value={settingsBackupPassword}
                             onChange={(event) => setSettingsBackupPassword(event.target.value)}
-                            placeholder="Backup-Passwort"
+                            placeholder="Optionales Backup-Passwort"
                             aria-label="Backup-Passwort"
                             className="col-span-1 px-3 py-2 text-[10px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#0078d4]"
                           />
@@ -4047,7 +4101,7 @@ Julia`,
                             type="password"
                             value={settingsBackupPasswordConfirm}
                             onChange={(event) => setSettingsBackupPasswordConfirm(event.target.value)}
-                            placeholder="Passwort bestätigen"
+                            placeholder="Optional bestätigen"
                             aria-label="Backup-Passwort bestätigen"
                             className="col-span-1 px-3 py-2 text-[10px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#0078d4]"
                           />
@@ -4334,14 +4388,14 @@ Julia`,
                       <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <div className="min-w-0">
                           <p className="text-[10.5px] font-extrabold text-slate-800 uppercase tracking-wider">Export / Import</p>
-                          <p className="text-[10px] text-slate-500 leading-4">Schutzlisten, Konten und Passwörter werden übertragbar verschlüsselt. Für den Import muss dasselbe Backup-Passwort eingegeben werden. Mailinhalte werden nicht exportiert.</p>
+                          <p className="text-[10px] text-slate-500 leading-4">Das Backup-Passwort ist nur erforderlich, wenn die JSON-Datei tatsächlich verschlüsselte Kontopasswörter enthält.</p>
                         </div>
                         <div className="grid min-w-[330px] grid-cols-2 gap-2 shrink-0">
                           <input
                             type="password"
                             value={settingsBackupPassword}
                             onChange={(event) => setSettingsBackupPassword(event.target.value)}
-                            placeholder="Backup-Passwort"
+                            placeholder="Optionales Backup-Passwort"
                             aria-label="Backup-Passwort"
                             className="col-span-1 px-3 py-2 text-[10px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#0078d4]"
                           />
@@ -4349,7 +4403,7 @@ Julia`,
                             type="password"
                             value={settingsBackupPasswordConfirm}
                             onChange={(event) => setSettingsBackupPasswordConfirm(event.target.value)}
-                            placeholder="Passwort bestätigen"
+                            placeholder="Optional bestätigen"
                             aria-label="Backup-Passwort bestätigen"
                             className="col-span-1 px-3 py-2 text-[10px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#0078d4]"
                           />
