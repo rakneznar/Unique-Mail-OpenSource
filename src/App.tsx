@@ -18,7 +18,8 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem }
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.3.32';
+const APP_VERSION = '0.3.33';
+(window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
 type AppLockConfig = { enabled: boolean; salt: string; hash: string; updatedAt?: string };
@@ -88,6 +89,17 @@ export default function App() {
   const backgroundJobsRef = useRef<BackgroundJob[]>([]);
   const backgroundWorkerRunningRef = useRef(false);
   const backgroundJobSequenceRef = useRef(0);
+
+  useEffect(() => {
+    const persist = () => (window as any).uniqueMailNative?.persistRendererStorage?.();
+    const intervalId = window.setInterval(persist, 1500);
+    window.addEventListener('beforeunload', persist);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('beforeunload', persist);
+      persist();
+    };
+  }, []);
 
   const processBackgroundJobs = () => {
     if (backgroundWorkerRunningRef.current) return;
@@ -784,6 +796,8 @@ exit`;
   const [appLockConfirmPassword, setAppLockConfirmPassword] = useState<string>('');
   const [appLockStatus, setAppLockStatus] = useState<string>('');
   const securitySettingsImportInputRef = React.useRef<HTMLInputElement>(null);
+  const [settingsBackupPassword, setSettingsBackupPassword] = useState<string>('');
+  const [settingsBackupPasswordConfirm, setSettingsBackupPasswordConfirm] = useState<string>('');
 
   const isSenderBlockedAddress = (sender?: string) => blockedSenderList.some(entry => normalizeSenderAddress(entry) === normalizeSenderAddress(sender));
   const guardBlockedSenderMail = (mail: Email): Email => isSenderBlockedAddress(mail.senderEmail)
@@ -954,6 +968,13 @@ exit`;
           smtpServer: String(item.smtpServer || ''),
           smtpPort: Number(item.smtpPort) || 465,
           provider: String(item.provider || 'Importiertes Konto'),
+          displayName: String(item.displayName || item.senderName || item.name || ''),
+          senderName: String(item.senderName || item.displayName || item.name || ''),
+          name: String(item.name || item.displayName || item.senderName || ''),
+          username: String(item.username || item.email || '').trim(),
+          imapSecurity: String(item.imapSecurity || 'ssl'),
+          smtpSecurity: String(item.smtpSecurity || 'ssl'),
+          folderMappings: item.folderMappings && typeof item.folderMappings === 'object' && !Array.isArray(item.folderMappings) ? item.folderMappings : {},
           customFolders: Array.isArray(item.customFolders) ? item.customFolders : [],
           serverFolders: Array.isArray(item.serverFolders) ? item.serverFolders : []
         }))
@@ -961,11 +982,23 @@ exit`;
     : [];
 
   const handleExportSecuritySettings = async () => {
+    if (settingsBackupPassword.length < 4) {
+      alert('Bitte ein Backup-Passwort mit mindestens 4 Zeichen eingeben. Es wird zum Import auf einem anderen PC benötigt.');
+      return;
+    }
+    if (settingsBackupPassword !== settingsBackupPasswordConfirm) {
+      alert('Die beiden Backup-Passwörter stimmen nicht überein.');
+      return;
+    }
     const nativeApi = (window as any).uniqueMailNative;
-    const exportedAccountPasswords = await nativeApi?.exportAccountPasswords?.().catch(() => null);
+    const exportedAccountPasswords = await nativeApi?.exportAccountPasswords?.({ backupPassword: settingsBackupPassword }).catch((error: any) => ({ ok: false, error: error?.message || String(error) }));
+    if (!exportedAccountPasswords?.ok) {
+      alert('Export fehlgeschlagen: ' + (exportedAccountPasswords?.error || 'Kontopasswörter konnten nicht gesichert werden.'));
+      return;
+    }
     const payload = {
       app: 'Unique Mail',
-      schema: 'unique-mail.settings.v5',
+      schema: 'unique-mail.settings.v6',
       version: APP_VERSION,
       exportedAt: new Date().toISOString(),
       settings: {
@@ -984,7 +1017,7 @@ exit`;
           imageDownloadDenyList: uniqueSenderList(imageDownloadDenyList),
           blockedSenderList: uniqueSenderList(blockedSenderList),
           appLock: appLockConfig,
-          accountPasswords: exportedAccountPasswords?.ok ? exportedAccountPasswords : null
+          accountPasswords: exportedAccountPasswords
         },
         signatures: {
           signatureActive,
@@ -1042,8 +1075,17 @@ exit`;
       }
 
       const nativeApi = (window as any).uniqueMailNative;
-      if (settings?.security?.accountPasswords?.credentials) {
-        await nativeApi?.importAccountPasswords?.(settings.security.accountPasswords).catch(() => null);
+      if (settings?.security?.accountPasswords) {
+        if (settingsBackupPassword.length < 4) {
+          throw new Error('Bitte vor dem Import das beim Export verwendete Backup-Passwort eingeben.');
+        }
+        const passwordImport = await nativeApi?.importAccountPasswords?.({
+          backup: settings.security.accountPasswords,
+          backupPassword: settingsBackupPassword
+        }).catch((error: any) => ({ ok: false, error: error?.message || String(error) }));
+        if (!passwordImport?.ok) {
+          throw new Error(passwordImport?.error || 'Kontopasswörter konnten nicht importiert werden.');
+        }
       }
 
       if (Array.isArray(settings?.accounts)) {
@@ -1128,10 +1170,15 @@ exit`;
         }
       }
 
-      setSyncStatusText('Einstellungen und lokale Arbeitsdaten wurden importiert und lokal gespeichert.');
+      await new Promise(resolve => window.setTimeout(resolve, 100));
+      const storageResult = nativeApi?.persistRendererStorage?.();
+      if (storageResult && !storageResult.ok) {
+        throw new Error(storageResult.error || 'Importierte Einstellungen konnten nicht dauerhaft gespeichert werden.');
+      }
+      setSyncStatusText('Einstellungen und lokale Arbeitsdaten wurden importiert und dauerhaft gespeichert.');
       alert('Einstellungen wurden erfolgreich importiert.');
     } catch (error: any) {
-      alert('Import fehlgeschlagen: Die Datei ist keine gueltige Unique-Mail-Einstellungsdatei.');
+      alert('Import fehlgeschlagen: ' + (error?.message || 'Die Datei ist keine gültige Unique-Mail-Einstellungsdatei.'));
     } finally {
       event.target.value = '';
     }
@@ -3985,9 +4032,25 @@ Julia`,
                       <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <div className="min-w-0">
                           <p className="text-[10.5px] font-extrabold text-slate-800 uppercase tracking-wider">Export / Import</p>
-                          <p className="text-[10px] text-slate-500 leading-4">Exportiert Konten, verschlüsselten Passwortspeicher, Signaturen, Abwesenheit, Notizen, Aufgaben, Kalender, Kategorien, Favoriten und Schutzlisten. Mailinhalte werden nicht exportiert.</p>
+                          <p className="text-[10px] text-slate-500 leading-4">Konten und Passwörter werden übertragbar verschlüsselt. Für den Import auf einem anderen PC muss dasselbe Backup-Passwort eingegeben werden. Mailinhalte werden nicht exportiert.</p>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="grid min-w-[330px] grid-cols-2 gap-2 shrink-0">
+                          <input
+                            type="password"
+                            value={settingsBackupPassword}
+                            onChange={(event) => setSettingsBackupPassword(event.target.value)}
+                            placeholder="Backup-Passwort"
+                            aria-label="Backup-Passwort"
+                            className="col-span-1 px-3 py-2 text-[10px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#0078d4]"
+                          />
+                          <input
+                            type="password"
+                            value={settingsBackupPasswordConfirm}
+                            onChange={(event) => setSettingsBackupPasswordConfirm(event.target.value)}
+                            placeholder="Passwort bestätigen"
+                            aria-label="Backup-Passwort bestätigen"
+                            className="col-span-1 px-3 py-2 text-[10px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#0078d4]"
+                          />
                           <button type="button" onClick={handleExportSecuritySettings} className="px-3 py-2 text-[10px] font-extrabold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 flex items-center gap-1.5">
                             <Download className="w-3.5 h-3.5" />
                             <span>Exportieren</span>
@@ -4271,9 +4334,25 @@ Julia`,
                       <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <div className="min-w-0">
                           <p className="text-[10.5px] font-extrabold text-slate-800 uppercase tracking-wider">Export / Import</p>
-                          <p className="text-[10px] text-slate-500 leading-4">Exportiert Schutzlisten, Konten, verschlüsselten Passwortspeicher, Signaturen, Abwesenheit, Notizen, Aufgaben, Kalender, Kategorien, Favoriten und Mail-Markierungen. Mailinhalte werden nicht exportiert.</p>
+                          <p className="text-[10px] text-slate-500 leading-4">Schutzlisten, Konten und Passwörter werden übertragbar verschlüsselt. Für den Import muss dasselbe Backup-Passwort eingegeben werden. Mailinhalte werden nicht exportiert.</p>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="grid min-w-[330px] grid-cols-2 gap-2 shrink-0">
+                          <input
+                            type="password"
+                            value={settingsBackupPassword}
+                            onChange={(event) => setSettingsBackupPassword(event.target.value)}
+                            placeholder="Backup-Passwort"
+                            aria-label="Backup-Passwort"
+                            className="col-span-1 px-3 py-2 text-[10px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#0078d4]"
+                          />
+                          <input
+                            type="password"
+                            value={settingsBackupPasswordConfirm}
+                            onChange={(event) => setSettingsBackupPasswordConfirm(event.target.value)}
+                            placeholder="Passwort bestätigen"
+                            aria-label="Backup-Passwort bestätigen"
+                            className="col-span-1 px-3 py-2 text-[10px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#0078d4]"
+                          />
                           <button type="button" onClick={handleExportSecuritySettings} className="px-3 py-2 text-[10px] font-extrabold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 flex items-center gap-1.5">
                             <Download className="w-3.5 h-3.5" />
                             <span>Exportieren</span>
@@ -4873,7 +4952,7 @@ Julia`,
                   placeholder="Passwort wird lokal gespeichert"
                   className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-250 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/15 focus:border-[#0078d4] font-medium"
                 />
-                <p className="text-[10px] text-slate-500 mt-2 leading-4">Das Passwort wird lokal verschluesselt gespeichert und im Einstellungs-Export verschluesselt mitgesichert.</p>
+                <p className="text-[10px] text-slate-500 mt-2 leading-4">Das Passwort wird lokal verschlüsselt gespeichert und im Einstellungs-Export mit dem separat gewählten Backup-Passwort übertragbar verschlüsselt.</p>
               </div>
 
               <div className="flex space-x-2 pt-2">

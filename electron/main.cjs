@@ -88,7 +88,84 @@ function configurePackagedUserDataPath() {
   }
 }
 
-configurePackagedUserDataPath();
+function configureTestUserDataPath() {
+  const testRoot = String(process.env.UNIQUE_MAIL_TEST_DATA_ROOT || '').trim();
+  if (!testRoot) return false;
+  const stableRoot = path.resolve(testRoot);
+  const userData = path.join(stableRoot, 'UserData');
+  const dataRoot = path.join(stableRoot, 'Data');
+  uniqueMailDataPaths = {
+    stableRoot,
+    userData,
+    dataRoot,
+    settingsDir: path.join(dataRoot, 'Settings'),
+    cacheDir: path.join(dataRoot, 'Cache'),
+    mailStoreDir: path.join(userData, 'mail-cache'),
+    logsDir: path.join(dataRoot, 'Logs')
+  };
+  Object.values(uniqueMailDataPaths).forEach(dir => fs.mkdirSync(dir, { recursive: true }));
+  app.setPath('userData', userData);
+  return true;
+}
+
+if (!configureTestUserDataPath()) configurePackagedUserDataPath();
+
+function rendererStoragePath() {
+  const settingsDir = uniqueMailDataPaths?.settingsDir || app.getPath('userData');
+  fs.mkdirSync(settingsDir, { recursive: true });
+  return path.join(settingsDir, 'renderer-storage.json');
+}
+
+function readRendererStorageSnapshot() {
+  try {
+    const target = rendererStoragePath();
+    if (!fs.existsSync(target)) return { found: false, values: {} };
+    const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
+    const values = parsed?.values && typeof parsed.values === 'object' && !Array.isArray(parsed.values)
+      ? parsed.values
+      : {};
+    return { found: true, values };
+  } catch (error) {
+    log(`renderer storage read failed: ${error.message || String(error)}`);
+    return { found: false, values: {} };
+  }
+}
+
+function writeJsonAtomically(target, value) {
+  const tempPath = `${target}.${process.pid}.tmp`;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(tempPath, JSON.stringify(value, null, 2), 'utf8');
+  fs.renameSync(tempPath, target);
+}
+
+function writeRendererStorageSnapshot(values) {
+  const sanitized = {};
+  const source = values && typeof values === 'object' && !Array.isArray(values) ? values : {};
+  Object.entries(source).forEach(([key, value]) => {
+    if (typeof key !== 'string' || typeof value !== 'string') return;
+    if (key === 'outlook_emails' || value.length > 2_000_000) return;
+    sanitized[key] = value;
+  });
+  writeJsonAtomically(rendererStoragePath(), {
+    format: 'unique-mail-renderer-storage-v1',
+    savedAt: new Date().toISOString(),
+    values: sanitized
+  });
+  return Object.keys(sanitized).length;
+}
+
+ipcMain.on('native:renderer-storage-load', (event) => {
+  event.returnValue = readRendererStorageSnapshot();
+});
+
+ipcMain.on('native:renderer-storage-save', (event, values) => {
+  try {
+    event.returnValue = { ok: true, count: writeRendererStorageSnapshot(values) };
+  } catch (error) {
+    log(`renderer storage write failed: ${error.message || String(error)}`);
+    event.returnValue = { ok: false, error: error.message || String(error) };
+  }
+});
 
 function sanitizeDownloadFilename(filename) {
   const clean = String(filename || 'anlage.bin').replace(/[\\/:*?"<>|]/g, '_').trim();
@@ -723,7 +800,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.3.32 <span class="unique-version-current">aktuell</span></h3><ul><li>Whitescreen-Ursache beseitigt: jede App-Instanz startet ihren lokalen Server auf einem freien Port; Doppelstarts werden auf das bestehende Fenster umgeleitet.</li><li>Grundlayout erscheint vor grossen Maildaten; Cache, Nachrichtentexte, Versand, Verschieben und Wartungssync laufen priorisiert und nacheinander im Hintergrund.</li><li>React-Fehleransicht statt leerem Fenster sowie GitHub-Releases-Feed und automatischer Release-Workflow ergaenzt.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.3.33 <span class="unique-version-current">aktuell</span></h3><ul><li>Importierte Konten und Einstellungen werden portunabhaengig unter Data/Settings gesichert und vor dem Start der Oberflaeche wiederhergestellt.</li><li>Kontopasswoerter werden mit einem frei waehlbaren Backup-Passwort per AES-256-GCM uebertragbar verschluesselt und auf dem Ziel-PC erneut im Windows-Passwortspeicher abgelegt.</li><li>Import prueft Passwortcontainer und dauerhafte Speicherung; Anzeigenamen, Serveroptionen und Ordnermetadaten bleiben vollstaendiger erhalten.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.3.32</h3><ul><li>Whitescreen-Ursache beseitigt: jede App-Instanz startet ihren lokalen Server auf einem freien Port; Doppelstarts werden auf das bestehende Fenster umgeleitet.</li><li>Grundlayout erscheint vor grossen Maildaten; Cache, Nachrichtentexte, Versand, Verschieben und Wartungssync laufen priorisiert und nacheinander im Hintergrund.</li><li>React-Fehleransicht statt leerem Fenster sowie GitHub-Releases-Feed und automatischer Release-Workflow ergaenzt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.31 <span class="unique-version-current">aktuell</span></h3><ul><li>Heruntergeladene Updates werden automatisch gestartet und nach Abschluss des Installers aus dem temporaeren Update-Ordner entfernt.</li><li>Optionaler SHA-256-Abgleich schuetzt vor unvollstaendigen oder manipulierten Installer-Downloads.</li><li>Erststarts enthalten keine vordefinierten Ordnerfavoriten mehr; entfernte Favoriten bleiben dauerhaft entfernt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.30 <span class="unique-version-current">aktuell</span></h3><ul><li>Update-Hinweis vorbereitet: Unique Mail kann beim Start einen konfigurierten latest.json-Feed pruefen und bei neuer Version einen auffaelligen Update-Button anzeigen.</li><li>Update-Button laedt den verlinkten Installer in den Downloads-Ordner und startet ihn zur Aktualisierung.</li><li>Mailversand blockiert den Compose-Dialog nicht mehr: Nachrichten gehen sofort in den Postausgang, SMTP/IMAP laufen danach im Hintergrund.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.29</h3><ul><li>Echte virtuelle Nachrichtenliste: grosse Ordner rendern nur sichtbare Mail-Zeilen plus Puffer statt hunderte oder tausende DOM-Elemente.</li><li>Ordnerwechsel, Scrollen und Mailauswahl reagieren dadurch bei sehr grossen Postfaechern spuerbar direkter.</li><li>Darkmode-Kontrast fuer Ribbon, Nachrichtenliste, Lesebereich, Warnbanner und HTML-Mail-Inhalte verbessert.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.28</h3><ul><li>Nachrichtenliste rendert grosse Ordner progressiv statt tausende Mail-Zeilen gleichzeitig in den DOM zu laden.</li><li>Beim Scrollen werden weitere Nachrichten nachgeladen; Ordnerwechsel und erste Auswahl reagieren dadurch schneller.</li><li>Automatischer Nach-Sync wird staerker gebuendelt und auf betroffene Konten begrenzt, damit Aktionen nicht dauernd volle Postfaecher neu abfragen.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.27</h3><ul><li>Automatischer Hintergrundsync nach Mail-Interaktionen: Senden, Loeschen, Archivieren, Verschieben, Lesen/Ungelesen und lokale Markierungen stossen einen Serverabgleich an.</li><li>Der Nach-Sync nutzt gespeicherte Kontopasswoerter ohne neue Passwort-Popups und prueft zugleich auf neue Mails und Serverordner.</li><li>Ordnerbaum beschleunigt: ungelesene Zaehler und lokale Ordnerpfade werden memoisiert, Klick-Animationen im Tree sind leichter.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.26</h3><ul><li>Appweite Mojibake- und Umlautfehler in sichtbaren Einstellungen, Menues, QuickSteps und Compose-Texten bereinigt.</li><li>App-Passwort in den Reiter Allgemein verschoben und Einstellungsbereiche dort deutlicher getrennt.</li><li>Interner Encoding-Filter bleibt erhalten, nutzt aber keine kaputten Literalzeichen mehr im Quelltext.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.25</h3><ul><li>App-Passwort ergaenzt: einmalige Abfrage beim Oeffnen der App.</li><li>App-Passwort kann gesetzt, geaendert und entfernt werden; Mindestlaenge 4 Zeichen, Buchstaben/Zahlen.</li><li>App-Passwort wird als Salt+Hash gespeichert, bleibt bei Updates erhalten und wird im Einstellungs-Export uebernommen.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.20</h3><ul><li>Feature Request und Bug Report stehen kompakt neben dem Versionsbutton und zeigen den vollstaendigen Text.</li><li>Minimieren, Maximieren und Beenden sind wieder dauerhaft sichtbar, nicht nur beim Hover.</li><li>Umlaut-/Mojibake-Fehler in sichtbaren Menues und Schaltflaechen bereinigt.</li><li>Kontoname pro Postfach ergaenzt und als Absendername fuer neue Mails verwendet.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.18</h3><ul><li>Installer-Generation fuer die 0.3.x-Reihe stabilisiert.</li><li>Kleinere Desktop-Overlay- und Versionsverlaufsanpassungen vorbereitet.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.17</h3><ul><li>Kontopasswoerter werden nach Eingabe lokal verschluesselt gespeichert und beim naechsten Start wiederverwendet.</li><li>Anhang-Vorschau im Lesebereich repariert; PDF-Dateien werden per Object/Iframe-Fallback angezeigt.</li><li>Anhangsymbol in der Nachrichtenliste dauerhaft neben dem Datum sichtbar.</li><li>Mailauswahl reagiert fluessiger durch memoisiertes HTML-Rendering und schnellere Link-/Bildbindung.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.16</h3><ul><li>Doppelte Loeschen-Schaltflaeche im Ribbon entfernt und Absender-sperren-Aktion im Ribbon ergaenzt.</li><li>PDF-Anhangvorschau nutzt robuste Blob-URLs und Dateiendungen; einzelne und alle Anhaenge koennen in den konfigurierten Downloadordner gespeichert werden.</li><li>Links in HTML-Mails oeffnen extern im Standardbrowser; gesendete Mails springen nach dem Versand in den Gesendet-Ordner.</li><li>Sichtbare Umlaut- und Encoding-Fehler in Compose, Kontextmenue und Schnellaktionen bereinigt.</li></ul></article>',
@@ -821,7 +899,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.3.32',
+        '0.3.33',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');
@@ -886,7 +964,7 @@ function readCredentialStore() {
 
 function writeCredentialStore(store) {
   const target = credentialStorePath();
-  fs.writeFileSync(target, JSON.stringify(store || {}, null, 2), 'utf8');
+  writeJsonAtomically(target, store || {});
 }
 
 function mergeCredentialStore(importedStore) {
@@ -942,28 +1020,100 @@ ipcMain.handle('native:delete-account-password', async (_event, email) => {
   }
 });
 
-ipcMain.handle('native:export-account-passwords', async () => {
+function encryptPortableCredentialBackup(store, backupPassword) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Der Windows-Passwortspeicher ist auf diesem Profil nicht verfuegbar.');
+  }
+  const credentials = {};
+  Object.entries(store).forEach(([email, encrypted]) => {
+    if (typeof encrypted !== 'string' || !encrypted) return;
+    credentials[email] = safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
+  });
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = crypto.scryptSync(backupPassword, salt, 32);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(credentials), 'utf8'), cipher.final()]);
+  return {
+    format: 'unique-mail-portable-credentials-v1',
+    algorithm: 'aes-256-gcm+scrypt',
+    salt: salt.toString('base64'),
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    data: encrypted.toString('base64'),
+    accountCount: Object.keys(credentials).length
+  };
+}
+
+function decryptPortableCredentialBackup(payload, backupPassword) {
+  const salt = Buffer.from(String(payload?.salt || ''), 'base64');
+  const iv = Buffer.from(String(payload?.iv || ''), 'base64');
+  const tag = Buffer.from(String(payload?.tag || ''), 'base64');
+  const data = Buffer.from(String(payload?.data || ''), 'base64');
+  if (salt.length !== 16 || iv.length !== 12 || tag.length !== 16 || data.length === 0) {
+    throw new Error('Der Passwort-Backupcontainer ist unvollstaendig oder beschaedigt.');
+  }
+  const key = crypto.scryptSync(backupPassword, salt, 32);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
+  const parsed = JSON.parse(decrypted.toString('utf8'));
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+}
+
+ipcMain.handle('native:export-account-passwords', async (_event, payload) => {
   try {
+    const backupPassword = String(payload?.backupPassword || '');
+    if (backupPassword.length < 4) {
+      return { ok: false, error: 'Das Backup-Passwort muss mindestens 4 Zeichen lang sein.' };
+    }
     const store = readCredentialStore();
     return {
       ok: true,
-      format: 'electron-safeStorage-v1',
-      machineBound: true,
+      ...encryptPortableCredentialBackup(store, backupPassword),
+      machineBound: false,
       exportedAt: new Date().toISOString(),
-      credentials: store
     };
   } catch (error) {
-    return { ok: false, error: error.message || String(error), credentials: {} };
+    return { ok: false, error: error.message || String(error) };
   }
 });
 
 ipcMain.handle('native:import-account-passwords', async (_event, payload) => {
   try {
-    const credentials = payload?.credentials || payload;
-    const count = mergeCredentialStore(credentials);
-    return { ok: true, count };
+    const backup = payload?.backup || payload;
+    const backupPassword = String(payload?.backupPassword || '');
+    if (backup?.format === 'unique-mail-portable-credentials-v1') {
+      if (backupPassword.length < 4) {
+        return { ok: false, error: 'Bitte das beim Export verwendete Backup-Passwort eingeben.' };
+      }
+      if (!safeStorage.isEncryptionAvailable()) {
+        return { ok: false, error: 'Der Windows-Passwortspeicher ist auf diesem Profil nicht verfuegbar.' };
+      }
+      const plaintextCredentials = decryptPortableCredentialBackup(backup, backupPassword);
+      const store = readCredentialStore();
+      Object.entries(plaintextCredentials).forEach(([email, password]) => {
+        const key = normalizeCredentialEmail(email);
+        if (key && typeof password === 'string' && password) {
+          store[key] = safeStorage.encryptString(password).toString('base64');
+        }
+      });
+      writeCredentialStore(store);
+      return { ok: true, count: Object.keys(plaintextCredentials).length };
+    }
+
+    if (backup?.format === 'electron-safeStorage-v1' || backup?.credentials) {
+      return {
+        ok: false,
+        error: 'Dieser alte Export enthaelt maschinengebundene Windows-Passwoerter. Bitte auf dem bisherigen PC mit Unique Mail 0.3.33 oder neuer erneut exportieren.'
+      };
+    }
+    return { ok: true, count: 0 };
   } catch (error) {
-    return { ok: false, error: error.message || String(error) };
+    const message = /authenticate|Unsupported state|bad decrypt/i.test(error.message || '')
+      ? 'Backup-Passwort ist falsch oder der Passwortcontainer ist beschaedigt.'
+      : error.message || String(error);
+    return { ok: false, error: message };
   }
 });
 ipcMain.handle('native:update-check', async () => {
