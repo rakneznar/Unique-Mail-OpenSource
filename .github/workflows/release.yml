@@ -38,16 +38,18 @@ jobs:
         run: |
           $package = Get-Content -Raw package.json | ConvertFrom-Json
           $version = [string]$package.version
-          $installerName = "Unique Mail Setup $version.exe"
-          $installerPath = Join-Path release $installerName
-          if (-not (Test-Path -LiteralPath $installerPath)) {
-            throw "Installer not found: $installerPath"
+          $builtInstallerName = "Unique Mail Setup $version.exe"
+          $builtInstallerPath = Join-Path release $builtInstallerName
+          if (-not (Test-Path -LiteralPath $builtInstallerPath)) {
+            throw "Installer not found: $builtInstallerPath"
           }
+          $releaseInstallerName = "Unique.Mail.Setup.$version.exe"
+          $installerPath = Join-Path release $releaseInstallerName
+          Copy-Item -LiteralPath $builtInstallerPath -Destination $installerPath -Force
           $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $installerPath).Hash
-          $encodedName = [Uri]::EscapeDataString($installerName)
           $manifest = [ordered]@{
             version = $version
-            url = "https://github.com/${{ github.repository }}/releases/download/v$version/$encodedName"
+            url = "https://github.com/${{ github.repository }}/releases/download/v$version/$releaseInstallerName"
             sha256 = $sha256
             publishedAt = (Get-Date).ToUniversalTime().ToString('o')
             notes = "Unique Mail $version"
