@@ -289,6 +289,134 @@ async function readBufferFromLocation(location) {
   return fs.readFileSync(target);
 }
 
+function emitUpdateProgress(payload) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('native:update-progress', payload);
+    }
+  } catch (error) {
+    log(`update progress event failed: ${error.message || String(error)}`);
+  }
+}
+
+function downloadHttpToFile(url, targetPath, onProgress, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error('Zu viele Weiterleitungen beim Update-Download.'));
+      return;
+    }
+    const client = /^https:/i.test(url) ? https : http;
+    const request = client.get(url, { timeout: 30000, headers: { 'User-Agent': `Unique-Mail/${app.getVersion()}` } }, response => {
+      const location = response.headers.location;
+      if ([301, 302, 303, 307, 308].includes(response.statusCode || 0) && location) {
+        response.resume();
+        downloadHttpToFile(new URL(location, url).toString(), targetPath, onProgress, redirectCount + 1).then(resolve, reject);
+        return;
+      }
+      if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) {
+        response.resume();
+        reject(new Error(`Update-Server antwortete mit HTTP ${response.statusCode}.`));
+        return;
+      }
+
+      const totalBytes = Number(response.headers['content-length']) || 0;
+      let receivedBytes = 0;
+      let lastPercent = -1;
+      const output = fs.createWriteStream(targetPath, { flags: 'w' });
+      const fail = error => {
+        try { output.destroy(); } catch {}
+        try { fs.rmSync(targetPath, { force: true }); } catch {}
+        reject(error);
+      };
+      response.on('data', chunk => {
+        receivedBytes += chunk.length;
+        const percent = totalBytes > 0 ? Math.min(100, Math.floor((receivedBytes / totalBytes) * 100)) : 0;
+        if (percent !== lastPercent) {
+          lastPercent = percent;
+          onProgress({ receivedBytes, totalBytes, percent });
+        }
+      });
+      response.on('error', fail);
+      output.on('error', fail);
+      output.on('finish', () => {
+        output.close(() => {
+          onProgress({ receivedBytes, totalBytes: totalBytes || receivedBytes, percent: 100 });
+          resolve({ receivedBytes, totalBytes: totalBytes || receivedBytes });
+        });
+      });
+      response.pipe(output);
+    });
+    request.on('timeout', () => request.destroy(new Error('Update-Server hat nicht rechtzeitig geantwortet.')));
+    request.on('error', reject);
+  });
+}
+
+function copyLocalUpdateToFile(sourcePath, targetPath, onProgress) {
+  return new Promise((resolve, reject) => {
+    const totalBytes = fs.statSync(sourcePath).size;
+    let receivedBytes = 0;
+    let lastPercent = -1;
+    const input = fs.createReadStream(sourcePath);
+    const output = fs.createWriteStream(targetPath, { flags: 'w' });
+    const fail = error => {
+      try { input.destroy(); } catch {}
+      try { output.destroy(); } catch {}
+      try { fs.rmSync(targetPath, { force: true }); } catch {}
+      reject(error);
+    };
+    input.on('data', chunk => {
+      receivedBytes += chunk.length;
+      const percent = totalBytes > 0 ? Math.min(100, Math.floor((receivedBytes / totalBytes) * 100)) : 100;
+      if (percent !== lastPercent) {
+        lastPercent = percent;
+        onProgress({ receivedBytes, totalBytes, percent });
+      }
+    });
+    input.on('error', fail);
+    output.on('error', fail);
+    output.on('finish', () => output.close(() => resolve({ receivedBytes, totalBytes })));
+    input.pipe(output);
+  });
+}
+
+async function downloadUpdateToFile(location, targetPath, onProgress) {
+  const source = String(location || '').trim();
+  if (/^https?:\/\//i.test(source)) return downloadHttpToFile(source, targetPath, onProgress);
+  const localPath = /^file:\/\//i.test(source) ? new URL(source) : source;
+  return copyLocalUpdateToFile(localPath, targetPath, onProgress);
+}
+
+function calculateFileSha256(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const input = fs.createReadStream(filePath);
+    input.on('data', chunk => hash.update(chunk));
+    input.on('error', reject);
+    input.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+function cleanupStaleUpdateFiles() {
+  try {
+    const updatesDir = path.join(app.getPath('temp'), 'Unique Mail', 'Updates');
+    if (!fs.existsSync(updatesDir)) return;
+    const minimumAgeMs = 60 * 1000;
+    for (const entry of fs.readdirSync(updatesDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !/\.(?:exe|ps1|cmd)$/i.test(entry.name)) continue;
+      const target = path.join(updatesDir, entry.name);
+      try {
+        if (Date.now() - fs.statSync(target).mtimeMs < minimumAgeMs) continue;
+        fs.rmSync(target, { force: true });
+        log(`stale update file removed: ${target}`);
+      } catch (error) {
+        log(`stale update cleanup skipped: ${target}: ${error.message || String(error)}`);
+      }
+    }
+  } catch (error) {
+    log(`stale update cleanup failed: ${error.message || String(error)}`);
+  }
+}
+
 async function checkForUniqueMailUpdate() {
   const currentVersion = app.getVersion();
   const feedLocation = readConfiguredUpdateFeedLocation();
@@ -325,64 +453,85 @@ async function checkForUniqueMailUpdate() {
 }
 
 async function downloadAndOpenUniqueMailUpdate() {
+  emitUpdateProgress({ phase: 'checking', percent: 0, message: 'Update wird vorbereitet...' });
   const update = lastKnownUpdate || (await checkForUniqueMailUpdate()).update;
   if (!update?.url) throw new Error('Kein Update zum Herunterladen verfuegbar.');
   const updatesDir = path.join(app.getPath('temp'), 'Unique Mail', 'Updates');
   fs.mkdirSync(updatesDir, { recursive: true });
-  const updatePathname = /^https?:\/\//i.test(update.url) || /^file:\/\//i.test(update.url) ? new URL(update.url).pathname : update.url;
+  const updatePathname = /^https?:\/\//i.test(update.url) || /^file:\/\//i.test(update.url)
+    ? decodeURIComponent(new URL(update.url).pathname)
+    : update.url;
   const parsedName = sanitizeDownloadFilename(path.basename(updatePathname) || `Unique Mail Setup ${update.version}.exe`);
   const filename = parsedName.toLowerCase().endsWith('.exe') ? parsedName : `Unique Mail Setup ${update.version}.exe`;
   const targetPath = uniqueDownloadPath(updatesDir, filename);
-  const data = await readBufferFromLocation(update.url);
-  if (data.length < 1024 * 1024) {
+  const downloadResult = await downloadUpdateToFile(update.url, targetPath, progress => {
+    emitUpdateProgress({ phase: 'downloading', version: update.version, ...progress });
+  });
+  if (downloadResult.receivedBytes < 1024 * 1024) {
+    try { fs.rmSync(targetPath, { force: true }); } catch {}
     throw new Error('Der Update-Download ist ungewoehnlich klein und wird aus Sicherheitsgruenden nicht gestartet.');
   }
+  emitUpdateProgress({ phase: 'verifying', percent: 100, version: update.version, message: 'Download wird geprueft...' });
   if (update.sha256) {
-    const actualSha256 = crypto.createHash('sha256').update(data).digest('hex');
+    const actualSha256 = await calculateFileSha256(targetPath);
     if (actualSha256 !== update.sha256) {
+      try { fs.rmSync(targetPath, { force: true }); } catch {}
       throw new Error('Die SHA-256-Pruefsumme des Updates stimmt nicht. Der Installer wird nicht gestartet.');
     }
   }
-  fs.writeFileSync(targetPath, data);
 
-  const cleanupCommand = [
-    "$ErrorActionPreference = 'Stop';",
-    '$installer = $env:UNIQUE_MAIL_INSTALLER_PATH;',
-    'if (-not (Test-Path -LiteralPath $installer)) { exit 2 }',
-    'try {',
-    '  $installerProcess = Start-Process -FilePath $installer -PassThru;',
-    '  $installerProcess.WaitForExit();',
-    '} finally {',
-    '  Start-Sleep -Seconds 2;',
-    '  for ($attempt = 0; $attempt -lt 30; $attempt++) {',
-    '    try { Remove-Item -LiteralPath $installer -Force -ErrorAction Stop; break }',
-    '    catch { Start-Sleep -Seconds 1 }',
-    '  }',
-    '}'
-  ].join(' ');
+  emitUpdateProgress({ phase: 'launching', percent: 100, version: update.version, message: 'Installer wird geoeffnet...' });
+  const installerProcess = await new Promise((resolve, reject) => {
+    const child = spawn(targetPath, [], { detached: true, stdio: 'ignore', windowsHide: false });
+    child.once('spawn', () => resolve(child));
+    child.once('error', reject);
+  });
+  installerProcess.unref();
 
+  const helperLogPath = path.join(uniqueMailDataPaths?.logsDir || app.getPath('userData'), 'update-helper.log');
+  const cleanupScriptPath = path.join(updatesDir, `cleanup-${Date.now()}.cmd`);
+  const cleanupScript = [
+    '@echo off',
+    'setlocal EnableExtensions DisableDelayedExpansion',
+    'set "installer=%~1"',
+    'set "installerPid=%~2"',
+    'set "log=%~3"',
+    '>>"%log%" echo [%date% %time%] Cleanup gestartet fuer PID %installerPid%',
+    ':waitForInstaller',
+    'tasklist /FI "PID eq %installerPid%" /NH 2^>NUL | findstr /C:"%installerPid%" ^>NUL',
+    'if not errorlevel 1 (',
+    '  timeout /t 2 /nobreak >NUL',
+    '  goto waitForInstaller',
+    ')',
+    'timeout /t 3 /nobreak >NUL',
+    'for /L %%A in (1,1,60) do (',
+    '  del /f /q "%installer%" 2>NUL',
+    '  if not exist "%installer%" goto installerRemoved',
+    '  timeout /t 1 /nobreak >NUL',
+    ')',
+    '>>"%log%" echo [%date% %time%] Installer konnte nicht entfernt werden: %installer%',
+    'goto cleanupFinished',
+    ':installerRemoved',
+    '>>"%log%" echo [%date% %time%] Installer entfernt: %installer%',
+    ':cleanupFinished',
+    'del /f /q "%~f0" 2>NUL',
+    'exit /b 0'
+  ].join('\r\n');
+  fs.writeFileSync(cleanupScriptPath, cleanupScript, 'ascii');
   try {
-    const launcher = spawn('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy', 'Bypass',
-      '-WindowStyle', 'Hidden',
-      '-Command', cleanupCommand
-    ], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-      env: { ...process.env, UNIQUE_MAIL_INSTALLER_PATH: targetPath }
-    });
-    launcher.unref();
+    const cleanupProcess = spawn('cmd.exe', [
+      '/d', '/c', 'call', cleanupScriptPath, targetPath, String(installerProcess.pid), helperLogPath
+    ], { detached: true, stdio: 'ignore', windowsHide: true });
+    cleanupProcess.unref();
+    log(`update cleanup helper launched: pid=${cleanupProcess.pid} script=${cleanupScriptPath}`);
   } catch (error) {
-    try { fs.rmSync(targetPath, { force: true }); } catch {}
-    throw error;
+    log(`update cleanup helper failed: ${error.message || String(error)}`);
   }
 
-  log(`update installer launched: ${targetPath}`);
-  setTimeout(() => app.quit(), 1000);
-  return { ok: true, filePath: targetPath, version: update.version, cleanupScheduled: true };
+  log(`update installer launched directly: pid=${installerProcess.pid} path=${targetPath}`);
+  emitUpdateProgress({ phase: 'launched', percent: 100, version: update.version, message: 'Installer ist geoeffnet.' });
+  setTimeout(() => app.quit(), 1800);
+  return { ok: true, filePath: targetPath, version: update.version, installerPid: installerProcess.pid, cleanupScheduled: true };
 }
 
 function log(message) {
@@ -643,22 +792,61 @@ async function createWindow() {
       right: 398px;
       width: 142px;
       display: none;
-      background: linear-gradient(135deg, #facc15, #f97316);
+      --update-progress: 0%;
+      overflow: hidden;
+      isolation: isolate;
+      background: #d1d5db;
       border-color: rgba(251, 191, 36, 0.8);
       color: #111827;
-      animation: uniqueUpdatePulse 1.3s ease-in-out infinite;
+    }
+    #unique-window-update-button::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      z-index: -1;
+      width: var(--update-progress);
+      background: linear-gradient(90deg, #22c55e, #0ea5e9);
+      transition: width 220ms ease;
     }
     #unique-window-update-button[data-visible="true"] {
       display: flex;
     }
-    #unique-window-update-button:disabled {
-      opacity: 0.76;
-      cursor: wait;
+    #unique-window-update-button[data-phase="available"] {
+      background: linear-gradient(135deg, #fde047, #fb923c);
+      animation: uniqueUpdateAttention 1.8s ease-in-out infinite;
+    }
+    #unique-window-update-button[data-phase="available"]::before {
+      width: 0;
+    }
+    #unique-window-update-button[data-phase="checking"] {
+      animation: uniqueUpdateWaiting 900ms ease-in-out infinite alternate;
+    }
+    #unique-window-update-button[data-phase="downloading"],
+    #unique-window-update-button[data-phase="verifying"],
+    #unique-window-update-button[data-phase="launching"],
+    #unique-window-update-button[data-phase="launched"] {
       animation: none;
     }
-    @keyframes uniqueUpdatePulse {
-      0%, 100% { box-shadow: 0 2px 10px rgba(251, 191, 36, 0.35); transform: translateY(0) scale(1); }
-      50% { box-shadow: 0 4px 22px rgba(251, 146, 60, 0.72); transform: translateY(-1px) scale(1.045); }
+    #unique-window-update-button[data-phase="launched"]::before {
+      width: 100%;
+      background: #22c55e;
+    }
+    #unique-window-update-button:disabled {
+      opacity: 1;
+      cursor: wait;
+    }
+    @keyframes uniqueUpdateAttention {
+      0%, 55%, 100% { box-shadow: 0 2px 10px rgba(251, 191, 36, 0.42); transform: translateY(0) rotate(0) scale(1); }
+      28% { box-shadow: 0 4px 25px rgba(249, 115, 22, 0.9); transform: translateY(-1px) rotate(0) scale(1.075); }
+      62% { transform: translateY(0) rotate(-5deg) scale(1.04); }
+      68% { transform: translateY(0) rotate(5deg) scale(1.04); }
+      74% { transform: translateY(0) rotate(-4deg) scale(1.04); }
+      80% { transform: translateY(0) rotate(4deg) scale(1.04); }
+      86% { box-shadow: 0 4px 22px rgba(249, 115, 22, 0.72); transform: translateY(0) rotate(0) scale(1.04); }
+    }
+    @keyframes uniqueUpdateWaiting {
+      from { box-shadow: 0 2px 8px rgba(14, 165, 233, 0.25); }
+      to { box-shadow: 0 3px 18px rgba(14, 165, 233, 0.72); }
     }
     #unique-window-minimize-button:hover,
     #unique-window-maximize-button:hover {
@@ -800,10 +988,11 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.3.33 <span class="unique-version-current">aktuell</span></h3><ul><li>Importierte Konten und Einstellungen werden portunabhaengig unter Data/Settings gesichert und vor dem Start der Oberflaeche wiederhergestellt.</li><li>Kontopasswoerter werden mit einem frei waehlbaren Backup-Passwort per AES-256-GCM uebertragbar verschluesselt und auf dem Ziel-PC erneut im Windows-Passwortspeicher abgelegt.</li><li>Import prueft Passwortcontainer und dauerhafte Speicherung; Anzeigenamen, Serveroptionen und Ordnermetadaten bleiben vollstaendiger erhalten.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.3.34 <span class="unique-version-current">aktuell</span></h3><ul><li>Update-Installer wird nach dem Download direkt und sichtbar gestartet; der fehlerhafte versteckte PowerShell-Start wurde entfernt.</li><li>Der Update-Button pulsiert und wackelt bei verfuegbaren Updates und zeigt den echten Downloadfortschritt als Fuellbalken.</li><li>Ein separater Aufraeumhelfer loescht den Installer erst nach dessen Abschluss und protokolliert den Ablauf.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.3.33</h3><ul><li>Importierte Konten und Einstellungen werden portunabhaengig unter Data/Settings gesichert und vor dem Start der Oberflaeche wiederhergestellt.</li><li>Kontopasswoerter werden mit einem frei waehlbaren Backup-Passwort per AES-256-GCM uebertragbar verschluesselt und auf dem Ziel-PC erneut im Windows-Passwortspeicher abgelegt.</li><li>Import prueft Passwortcontainer und dauerhafte Speicherung; Anzeigenamen, Serveroptionen und Ordnermetadaten bleiben vollstaendiger erhalten.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.32</h3><ul><li>Whitescreen-Ursache beseitigt: jede App-Instanz startet ihren lokalen Server auf einem freien Port; Doppelstarts werden auf das bestehende Fenster umgeleitet.</li><li>Grundlayout erscheint vor grossen Maildaten; Cache, Nachrichtentexte, Versand, Verschieben und Wartungssync laufen priorisiert und nacheinander im Hintergrund.</li><li>React-Fehleransicht statt leerem Fenster sowie GitHub-Releases-Feed und automatischer Release-Workflow ergaenzt.</li></ul></article>',
-          '<article class="unique-version-entry"><h3>Version 0.3.31 <span class="unique-version-current">aktuell</span></h3><ul><li>Heruntergeladene Updates werden automatisch gestartet und nach Abschluss des Installers aus dem temporaeren Update-Ordner entfernt.</li><li>Optionaler SHA-256-Abgleich schuetzt vor unvollstaendigen oder manipulierten Installer-Downloads.</li><li>Erststarts enthalten keine vordefinierten Ordnerfavoriten mehr; entfernte Favoriten bleiben dauerhaft entfernt.</li></ul></article>',
-          '<article class="unique-version-entry"><h3>Version 0.3.30 <span class="unique-version-current">aktuell</span></h3><ul><li>Update-Hinweis vorbereitet: Unique Mail kann beim Start einen konfigurierten latest.json-Feed pruefen und bei neuer Version einen auffaelligen Update-Button anzeigen.</li><li>Update-Button laedt den verlinkten Installer in den Downloads-Ordner und startet ihn zur Aktualisierung.</li><li>Mailversand blockiert den Compose-Dialog nicht mehr: Nachrichten gehen sofort in den Postausgang, SMTP/IMAP laufen danach im Hintergrund.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.29</h3><ul><li>Echte virtuelle Nachrichtenliste: grosse Ordner rendern nur sichtbare Mail-Zeilen plus Puffer statt hunderte oder tausende DOM-Elemente.</li><li>Ordnerwechsel, Scrollen und Mailauswahl reagieren dadurch bei sehr grossen Postfaechern spuerbar direkter.</li><li>Darkmode-Kontrast fuer Ribbon, Nachrichtenliste, Lesebereich, Warnbanner und HTML-Mail-Inhalte verbessert.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.28</h3><ul><li>Nachrichtenliste rendert grosse Ordner progressiv statt tausende Mail-Zeilen gleichzeitig in den DOM zu laden.</li><li>Beim Scrollen werden weitere Nachrichten nachgeladen; Ordnerwechsel und erste Auswahl reagieren dadurch schneller.</li><li>Automatischer Nach-Sync wird staerker gebuendelt und auf betroffene Konten begrenzt, damit Aktionen nicht dauernd volle Postfaecher neu abfragen.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.27</h3><ul><li>Automatischer Hintergrundsync nach Mail-Interaktionen: Senden, Loeschen, Archivieren, Verschieben, Lesen/Ungelesen und lokale Markierungen stossen einen Serverabgleich an.</li><li>Der Nach-Sync nutzt gespeicherte Kontopasswoerter ohne neue Passwort-Popups und prueft zugleich auf neue Mails und Serverordner.</li><li>Ordnerbaum beschleunigt: ungelesene Zaehler und lokale Ordnerpfade werden memoisiert, Klick-Animationen im Tree sind leichter.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.26</h3><ul><li>Appweite Mojibake- und Umlautfehler in sichtbaren Einstellungen, Menues, QuickSteps und Compose-Texten bereinigt.</li><li>App-Passwort in den Reiter Allgemein verschoben und Einstellungsbereiche dort deutlicher getrennt.</li><li>Interner Encoding-Filter bleibt erhalten, nutzt aber keine kaputten Literalzeichen mehr im Quelltext.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.25</h3><ul><li>App-Passwort ergaenzt: einmalige Abfrage beim Oeffnen der App.</li><li>App-Passwort kann gesetzt, geaendert und entfernt werden; Mindestlaenge 4 Zeichen, Buchstaben/Zahlen.</li><li>App-Passwort wird als Salt+Hash gespeichert, bleibt bei Updates erhalten und wird im Einstellungs-Export uebernommen.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.20</h3><ul><li>Feature Request und Bug Report stehen kompakt neben dem Versionsbutton und zeigen den vollstaendigen Text.</li><li>Minimieren, Maximieren und Beenden sind wieder dauerhaft sichtbar, nicht nur beim Hover.</li><li>Umlaut-/Mojibake-Fehler in sichtbaren Menues und Schaltflaechen bereinigt.</li><li>Kontoname pro Postfach ergaenzt und als Absendername fuer neue Mails verwendet.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.18</h3><ul><li>Installer-Generation fuer die 0.3.x-Reihe stabilisiert.</li><li>Kleinere Desktop-Overlay- und Versionsverlaufsanpassungen vorbereitet.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.17</h3><ul><li>Kontopasswoerter werden nach Eingabe lokal verschluesselt gespeichert und beim naechsten Start wiederverwendet.</li><li>Anhang-Vorschau im Lesebereich repariert; PDF-Dateien werden per Object/Iframe-Fallback angezeigt.</li><li>Anhangsymbol in der Nachrichtenliste dauerhaft neben dem Datum sichtbar.</li><li>Mailauswahl reagiert fluessiger durch memoisiertes HTML-Rendering und schnellere Link-/Bildbindung.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.3.31</h3><ul><li>Heruntergeladene Updates werden automatisch gestartet und nach Abschluss des Installers aus dem temporaeren Update-Ordner entfernt.</li><li>Optionaler SHA-256-Abgleich schuetzt vor unvollstaendigen oder manipulierten Installer-Downloads.</li><li>Erststarts enthalten keine vordefinierten Ordnerfavoriten mehr; entfernte Favoriten bleiben dauerhaft entfernt.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.3.30</h3><ul><li>Update-Hinweis vorbereitet: Unique Mail kann beim Start einen konfigurierten latest.json-Feed pruefen und bei neuer Version einen auffaelligen Update-Button anzeigen.</li><li>Update-Button laedt den verlinkten Installer in den Downloads-Ordner und startet ihn zur Aktualisierung.</li><li>Mailversand blockiert den Compose-Dialog nicht mehr: Nachrichten gehen sofort in den Postausgang, SMTP/IMAP laufen danach im Hintergrund.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.29</h3><ul><li>Echte virtuelle Nachrichtenliste: grosse Ordner rendern nur sichtbare Mail-Zeilen plus Puffer statt hunderte oder tausende DOM-Elemente.</li><li>Ordnerwechsel, Scrollen und Mailauswahl reagieren dadurch bei sehr grossen Postfaechern spuerbar direkter.</li><li>Darkmode-Kontrast fuer Ribbon, Nachrichtenliste, Lesebereich, Warnbanner und HTML-Mail-Inhalte verbessert.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.28</h3><ul><li>Nachrichtenliste rendert grosse Ordner progressiv statt tausende Mail-Zeilen gleichzeitig in den DOM zu laden.</li><li>Beim Scrollen werden weitere Nachrichten nachgeladen; Ordnerwechsel und erste Auswahl reagieren dadurch schneller.</li><li>Automatischer Nach-Sync wird staerker gebuendelt und auf betroffene Konten begrenzt, damit Aktionen nicht dauernd volle Postfaecher neu abfragen.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.27</h3><ul><li>Automatischer Hintergrundsync nach Mail-Interaktionen: Senden, Loeschen, Archivieren, Verschieben, Lesen/Ungelesen und lokale Markierungen stossen einen Serverabgleich an.</li><li>Der Nach-Sync nutzt gespeicherte Kontopasswoerter ohne neue Passwort-Popups und prueft zugleich auf neue Mails und Serverordner.</li><li>Ordnerbaum beschleunigt: ungelesene Zaehler und lokale Ordnerpfade werden memoisiert, Klick-Animationen im Tree sind leichter.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.26</h3><ul><li>Appweite Mojibake- und Umlautfehler in sichtbaren Einstellungen, Menues, QuickSteps und Compose-Texten bereinigt.</li><li>App-Passwort in den Reiter Allgemein verschoben und Einstellungsbereiche dort deutlicher getrennt.</li><li>Interner Encoding-Filter bleibt erhalten, nutzt aber keine kaputten Literalzeichen mehr im Quelltext.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.25</h3><ul><li>App-Passwort ergaenzt: einmalige Abfrage beim Oeffnen der App.</li><li>App-Passwort kann gesetzt, geaendert und entfernt werden; Mindestlaenge 4 Zeichen, Buchstaben/Zahlen.</li><li>App-Passwort wird als Salt+Hash gespeichert, bleibt bei Updates erhalten und wird im Einstellungs-Export uebernommen.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.20</h3><ul><li>Feature Request und Bug Report stehen kompakt neben dem Versionsbutton und zeigen den vollstaendigen Text.</li><li>Minimieren, Maximieren und Beenden sind wieder dauerhaft sichtbar, nicht nur beim Hover.</li><li>Umlaut-/Mojibake-Fehler in sichtbaren Menues und Schaltflaechen bereinigt.</li><li>Kontoname pro Postfach ergaenzt und als Absendername fuer neue Mails verwendet.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.18</h3><ul><li>Installer-Generation fuer die 0.3.x-Reihe stabilisiert.</li><li>Kleinere Desktop-Overlay- und Versionsverlaufsanpassungen vorbereitet.</li></ul></article><article class="unique-version-entry"><h3>Version 0.3.17</h3><ul><li>Kontopasswoerter werden nach Eingabe lokal verschluesselt gespeichert und beim naechsten Start wiederverwendet.</li><li>Anhang-Vorschau im Lesebereich repariert; PDF-Dateien werden per Object/Iframe-Fallback angezeigt.</li><li>Anhangsymbol in der Nachrichtenliste dauerhaft neben dem Datum sichtbar.</li><li>Mailauswahl reagiert fluessiger durch memoisiertes HTML-Rendering und schnellere Link-/Bildbindung.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.16</h3><ul><li>Doppelte Loeschen-Schaltflaeche im Ribbon entfernt und Absender-sperren-Aktion im Ribbon ergaenzt.</li><li>PDF-Anhangvorschau nutzt robuste Blob-URLs und Dateiendungen; einzelne und alle Anhaenge koennen in den konfigurierten Downloadordner gespeichert werden.</li><li>Links in HTML-Mails oeffnen extern im Standardbrowser; gesendete Mails springen nach dem Versand in den Gesendet-Ordner.</li><li>Sichtbare Umlaut- und Encoding-Fehler in Compose, Kontextmenue und Schnellaktionen bereinigt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.15</h3><ul><li>Nachrichtenliste zeigt Mail-Daten jetzt mit Jahr im benutzerdefinierten Datumsformat.</li><li>Neue Einstellungen-Abteilung fuer Sprache und Datumsformat; Hauptnavigation, Ribbon und Nachrichtenliste koennen auf Englisch umgestellt werden.</li><li>HTML-Mails werden bereinigt und isoliert, damit fremde Mail-CSS-Regeln das App-Layout nicht mehr verschieben.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.14</h3><ul><li>Mail-Aktionsbuttons neu geordnet: links Anpinnen und Gelesen/Ungelesen, rechts Favorit und Loeschen.</li><li>Die vier Mail-Aktionen sind jetzt auch im Start-Ribbon verfuegbar.</li><li>IMAP-Anhaenge erhalten echte Dateinamen, Groessen und Vorschau-Daten; Kalender-Termine speichern robuster.</li></ul></article>',
@@ -851,30 +1040,54 @@ async function createWindow() {
         async () => {
           if (!window.uniqueMailNative?.downloadAndInstallUpdate) return;
           updateButton.disabled = true;
-          const previousLabel = updateButton.textContent;
-          updateButton.textContent = 'Update laedt...';
+          updateButton.dataset.phase = 'checking';
+          updateButton.style.setProperty('--update-progress', '0%');
+          updateButton.textContent = 'Update startet...';
           try {
             const result = await window.uniqueMailNative.downloadAndInstallUpdate();
             if (!result?.ok) throw new Error(result?.error || 'Update konnte nicht geladen werden.');
+            updateButton.dataset.phase = 'launched';
+            updateButton.style.setProperty('--update-progress', '100%');
             updateButton.textContent = 'Installer offen';
             updateButton.title = 'Der Update-Installer wurde gestartet.';
           } catch (error) {
-            updateButton.textContent = previousLabel || 'Update verfuegbar';
-            alert('Update konnte nicht installiert werden:\\n\\n' + (error?.message || error));
-          } finally {
+            updateButton.dataset.phase = 'available';
+            updateButton.style.setProperty('--update-progress', '0%');
+            updateButton.textContent = 'Update verfuegbar';
             updateButton.disabled = false;
+            alert('Update konnte nicht installiert werden:\\n\\n' + (error?.message || error));
           }
         }
       );
       updateButton.dataset.visible = 'false';
+
+      const applyUpdateProgress = (progress) => {
+        const phase = String(progress?.phase || 'checking');
+        const percent = Math.max(0, Math.min(100, Number(progress?.percent) || 0));
+        updateButton.dataset.phase = phase;
+        updateButton.style.setProperty('--update-progress', percent + '%');
+        if (phase === 'checking') updateButton.textContent = 'Update startet...';
+        if (phase === 'downloading') updateButton.textContent = 'Download ' + percent + '%';
+        if (phase === 'verifying') updateButton.textContent = 'Download pruefen';
+        if (phase === 'launching') updateButton.textContent = 'Installer startet';
+        if (phase === 'launched') updateButton.textContent = 'Installer offen';
+        if (phase === 'error') {
+          updateButton.textContent = 'Update fehlgeschlagen';
+          updateButton.disabled = false;
+        }
+      };
+      window.uniqueMailNative?.onUpdateProgress?.(applyUpdateProgress);
 
       const showUpdateState = (result) => {
         if (result?.ok && result.updateAvailable && result.update?.version) {
           updateButton.textContent = 'Update ' + result.update.version;
           updateButton.title = (result.message || 'Neue Version verfuegbar.') + ' Klicken zum Herunterladen und Installieren.';
           updateButton.dataset.visible = 'true';
+          updateButton.dataset.phase = 'available';
+          updateButton.style.setProperty('--update-progress', '0%');
         } else {
           updateButton.dataset.visible = 'false';
+          updateButton.dataset.phase = 'idle';
         }
       };
 
@@ -899,7 +1112,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.3.33',
+        '0.3.34',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');
@@ -1130,6 +1343,7 @@ ipcMain.handle('native:update-download-install', async () => {
     return await downloadAndOpenUniqueMailUpdate();
   } catch (error) {
     log(`update download failed: ${error.message || String(error)}`);
+    emitUpdateProgress({ phase: 'error', percent: 0, message: error.message || String(error) });
     return { ok: false, error: error.message || String(error) };
   }
 });
@@ -1208,7 +1422,10 @@ if (!hasSingleInstanceLock) {
     mainWindow.show();
     mainWindow.focus();
   });
-  app.whenReady().then(createWindow);
+  app.whenReady().then(() => {
+    cleanupStaleUpdateFiles();
+    return createWindow();
+  });
 }
 
 app.on('window-all-closed', () => {

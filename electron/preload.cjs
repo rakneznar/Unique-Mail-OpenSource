@@ -76,7 +76,11 @@ contextBridge.exposeInMainWorld('uniqueMailNative', {
   restoreRendererStorage: () => restoreLocalStorageSnapshot(),
   persistRendererStorage: () => persistLocalStorageSnapshot(),
   checkForUpdate: () => ipcRenderer.invoke('native:update-check'),
-  downloadAndInstallUpdate: () => ipcRenderer.invoke('native:update-download-install')
+  downloadAndInstallUpdate: () => ipcRenderer.invoke('native:update-download-install'),
+  onUpdateProgress: (callback) => {
+    if (typeof callback !== 'function') return;
+    ipcRenderer.on('native:update-progress', (_event, payload) => callback(payload));
+  }
 });
 
 try {
