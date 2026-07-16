@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Paperclip, Mail, Phone, MapPin, Building, Briefcase, Calendar, 
   Clock, CheckSquare, Code, Check, Send, Copy, FileText, ShieldAlert
@@ -190,6 +191,15 @@ export default function ReadingPane({
     });
     setCalendarDraft(null);
   };
+
+  React.useEffect(() => {
+    if (!calendarDraft) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCalendarDraft(null);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [calendarDraft]);
 
   const activeEmail = React.useMemo(() => emails.find(e => e.id === selectedEmailId), [emails, selectedEmailId]);
   const activeContact = React.useMemo(() => contacts.find(c => c.id === selectedContactId), [contacts, selectedContactId]);
@@ -1487,7 +1497,9 @@ a{color:#0078d4;cursor:pointer}
                   type="button"
                   data-calendar-day={formatCalendarInputDate(date)}
                   title="Doppelklick: Termin an diesem Tag erfassen"
-                  onClick={() => undefined}
+                  onClick={(event) => {
+                    if (event.detail >= 2) openCalendarDraft(date);
+                  }}
                   onDoubleClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -1521,14 +1533,27 @@ a{color:#0078d4;cursor:pointer}
           </div>
         </div>
 
-        {calendarDraft && (
-          <div data-calendar-event-dialog className="mx-6 mb-6 rounded-xl border border-green-200 bg-green-50/80 shadow-sm overflow-hidden">
+        {calendarDraft && createPortal(
+          <div
+            className="fixed inset-0 z-[500] flex justify-end bg-slate-950/25"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setCalendarDraft(null);
+            }}
+          >
+          <aside
+            data-calendar-event-dialog
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calendar-event-dialog-title"
+            className="h-full w-[420px] max-w-[92vw] overflow-y-auto border-l border-green-200 bg-green-50 shadow-2xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
             <div className="px-4 py-3 border-b border-green-200 bg-white/70 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-extrabold text-green-900 uppercase tracking-wider">
+              <div id="calendar-event-dialog-title" className="flex items-center gap-2 text-xs font-extrabold text-green-900 uppercase tracking-wider">
                 <Calendar className="w-4 h-4 text-green-600" />
                 <span>Neuer Termin</span>
               </div>
-              <button type="button" onClick={() => setCalendarDraft(null)} className="text-slate-400 hover:text-red-500 text-sm font-black px-2">x</button>
+              <button type="button" aria-label="Terminfenster schliessen" onClick={() => setCalendarDraft(null)} className="h-8 w-8 border border-slate-200 bg-white text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 text-sm font-black">X</button>
             </div>
             <div className="p-4 grid grid-cols-2 gap-3 text-xs">
               <label className="col-span-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
@@ -1560,7 +1585,9 @@ a{color:#0078d4;cursor:pointer}
                 <button data-calendar-event-save type="button" onClick={saveCalendarDraft} disabled={!calendarDraft.title.trim()} className="px-4 py-2 rounded-lg bg-green-600 text-white font-extrabold hover:bg-green-700 disabled:opacity-45 disabled:cursor-not-allowed">Speichern</button>
               </div>
             </div>
-          </div>
+          </aside>
+          </div>,
+          document.body
         )}
 
         <div className="p-6 border-t border-slate-200 bg-slate-50/15">

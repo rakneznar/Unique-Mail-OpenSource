@@ -383,6 +383,7 @@ export default function FolderTree({
         <div className="px-1 pb-1">
           <button
             id="unified-inbox-btn"
+            data-unified-inbox
             onClick={() => {
               // Select unified-inbox folder
               setSelectedFolder('unified-inbox');
@@ -398,10 +399,7 @@ export default function FolderTree({
                 <Inbox className={`w-4 h-4 ${selectedFolder === 'unified-inbox' ? 'text-amber-600' : 'text-[#0078d4]'}`} />
                 <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-500 rounded-full border border-white animate-ping"></span>
               </div>
-              <div className="min-w-0">
-                <span className="block font-bold text-[11.5px]">Gemeinsamer Posteingang</span>
-                <span className="block text-[9.5px] font-mono text-slate-500 truncate" title={accounts.map(account => account.email).join(', ')}>{accounts.map(account => account.email).join(', ') || activeAccountEmail}</span>
-              </div>
+              <span className="min-w-0 truncate font-bold text-[11.5px]">Gemeinsamer Posteingang</span>
             </div>
             {(() => {
               const count = emails.filter(m => folderMatches(m.imapFolder || m.folder, 'inbox') && !m.isRead).length;
