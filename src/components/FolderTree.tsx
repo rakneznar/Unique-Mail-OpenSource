@@ -478,6 +478,10 @@ export default function FolderTree({
           const folders = getAccountFolders(account);
           const isCurrentActive = activeAccountEmail.toLowerCase() === account.email.toLowerCase();
           const isCollapsed = !!collapsedAccounts[account.email];
+          const configuredAccountName = String(account.displayName || account.senderName || '').trim();
+          const hasConfiguredAccountName = !!configuredAccountName
+            && configuredAccountName.toLowerCase() !== account.email.toLowerCase();
+          const accountHeading = hasConfiguredAccountName ? configuredAccountName : account.email;
 
           return (
             <div key={account.email} className={`pb-2 border-b border-[#e2e8f0]/80 last:border-b-0 ${isCurrentActive ? 'bg-[#0078d4]/3 rounded-xl p-1 border border-[#0078d4]/8 shadow-xs' : ''}`}>
@@ -490,7 +494,13 @@ export default function FolderTree({
                 ) : (
                   <ChevronDown className="w-3.5 h-3.5 mr-1 text-slate-400 text-left shrink-0 transition-transform" />
                 )}
-                <span title={account.email} className="truncate text-xs text-[#0078d4] font-bold tracking-tight">{account.displayName || account.senderName || account.email} <span className="font-mono text-[10px] text-slate-500 normal-case">{account.email}</span></span>
+                <span
+                  data-account-heading={account.email}
+                  title={hasConfiguredAccountName ? account.email : undefined}
+                  className={`truncate text-xs tracking-tight normal-case ${hasConfiguredAccountName ? 'text-[#0078d4] font-bold' : 'font-mono text-[10px] text-slate-500 font-semibold'}`}
+                >
+                  {accountHeading}
+                </span>
               </div>
 
               {!isCollapsed && (

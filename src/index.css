@@ -526,6 +526,51 @@ textarea:not(:disabled):not([readonly]),
 
 
 /* Unique Mail 0.2.13 layout containment */
+#outlook-app-frame {
+  min-width: 0;
+  max-width: 100vw;
+}
+
+#outlook-workspace {
+  min-width: 0;
+  max-width: 100%;
+  contain: layout;
+  isolation: isolate;
+}
+
+#outlook-workspace > #folder-tree-sidebar {
+  flex: 0 0 16rem;
+}
+
+#outlook-workspace > #item-list-container {
+  flex: 0 0 20rem;
+}
+
+#mail-reading-pane,
+#no-mail-pane,
+#new-email-writer {
+  flex: 1 1 0%;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+#mail-reading-pane {
+  contain: layout paint;
+}
+
+#mail-reading-pane > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rich-email-frame {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  contain: layout paint style;
+}
+
 #outlook-ribbon {
   isolation: isolate;
 }

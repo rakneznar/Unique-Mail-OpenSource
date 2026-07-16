@@ -160,7 +160,7 @@ export default function Ribbon({
   }, [showCategoryDropdown]);
   
   return (
-    <div id="outlook-ribbon" className="bg-slate-50 text-slate-800 flex flex-col select-none border-b border-slate-205 shrink-0 font-sans">
+    <div id="outlook-ribbon" className="w-full min-w-0 max-w-full overflow-hidden bg-slate-50 text-slate-800 flex flex-col select-none border-b border-slate-205 shrink-0 font-sans">
       
       {/* 1. Quick Access Toolbar & App Bar Title */}
       <div className="h-[48px] min-h-[48px] bg-slate-55 flex items-center justify-between pl-4 pr-44 border-b border-slate-200 text-xs shadow-xs">
@@ -271,11 +271,11 @@ export default function Ribbon({
       </div>
 
       {/* 3. Ribbon Controls Panel */}
-      <div className="h-24 min-h-24 bg-white border-b border-slate-200 flex items-center justify-start gap-0 px-4 overflow-x-auto overflow-y-hidden select-none shadow-xs">
+      <div className="h-24 min-h-24 min-w-0 max-w-full bg-white border-b border-slate-200 flex items-center justify-start gap-0 px-4 overflow-x-auto overflow-y-hidden select-none shadow-xs">
         
         {/* --- DYNAMIC DEV TAB CONTROLS --- */}
         {currentPage === 'dev' && (
-          <div className="flex h-full items-stretch py-1.5">
+          <div className="flex h-full items-stretch py-1.5 shrink-0">
             {/* Dev Center Navigation */}
             <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
               <div className="flex items-center space-x-2">
@@ -315,7 +315,7 @@ export default function Ribbon({
 
         {/* --- START TAB CONTROLS --- */}
         {currentPage !== 'dev' && activeTab === 'start' && (
-          <div className="flex h-full items-stretch py-1.5">
+          <div className="flex h-full items-stretch py-1.5 shrink-0">
             {/* Group: Neu with rounded-xl buttons */}
             <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
               <div className="flex items-center space-x-2.5">
@@ -670,7 +670,7 @@ export default function Ribbon({
 
         {/* --- SEND / RECEIVE TAB CONTROLS --- */}
         {currentPage !== 'dev' && activeTab === 'sync' && (
-          <div className="flex h-full items-stretch py-1.5">
+          <div className="flex h-full items-stretch py-1.5 shrink-0">
             {/* Senden & Empfangen */}
             <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
               <div className="flex space-x-2.5">
@@ -721,7 +721,7 @@ export default function Ribbon({
 
         {/* --- FOLDER TAB CONTROLS --- */}
         {currentPage !== 'dev' && activeTab === 'folder' && (
-          <div className="flex h-full items-stretch py-1.5">
+          <div className="flex h-full items-stretch py-1.5 shrink-0">
             {/* Neu group */}
             <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
               <div className="flex items-center space-x-2">
@@ -758,7 +758,7 @@ export default function Ribbon({
 
         {/* --- VIEW TAB CONTROLS --- */}
         {currentPage !== 'dev' && activeTab === 'view' && (
-          <div className="flex h-full items-stretch py-1.5">
+          <div className="flex h-full items-stretch py-1.5 shrink-0">
             {/* Group: Layout / Density */}
             <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
               <div className="flex items-center space-x-4">

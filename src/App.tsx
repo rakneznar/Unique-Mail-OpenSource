@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem }
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.3.35';
+const APP_VERSION = '0.4.35';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -3516,7 +3516,7 @@ Julia`,
       />
 
       {/* 2. Main Workspace Layout Area */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      <div id="outlook-workspace" className="flex-1 flex overflow-hidden min-h-0 min-w-0 max-w-full">
         
         {/* Navigation Rail extreme left */}
         <NavigationRail 

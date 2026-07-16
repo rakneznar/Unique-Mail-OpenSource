@@ -1,7 +1,7 @@
 {
   "name": "unique-mail",
   "private": true,
-  "version": "0.3.35",
+  "version": "0.4.35",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

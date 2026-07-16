@@ -212,32 +212,59 @@ export default function ReadingPane({
   const maskRemoteImages = (html: string) => html.replace(remoteImageReplacePattern, () =>
     '<div style="border:1px dashed #f59e0b;background:#fffbeb;color:#92400e;padding:10px 12px;border-radius:8px;font:12px sans-serif;margin:8px 0;">Externe Bilder und Inhalte wurden blockiert. Nutzen Sie oben die Bildfreigabe, wenn Sie diesem Absender vertrauen.</div>'
   );
-  const sanitizeMailHtml = (html: string) => html
-    .replace(/<!doctype[^>]*>/gi, '')
-    .replace(/<head[\s\S]*?<\/head>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<link\b[^>]*>/gi, '')
-    .replace(/<meta\b[^>]*>/gi, '')
-    .replace(/<base\b[^>]*>/gi, '')
-    .replace(/<\/?(?:html|body)\b[^>]*>/gi, '')
-    .replace(/\son\w+=(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\sstyle=("|')([\s\S]*?)\1/gi, (_match, quote, style) => {
-      const cleanedStyle = String(style)
-        .replace(/position\s*:\s*(fixed|absolute|sticky)\s*;?/gi, '')
-        .replace(/z-index\s*:\s*\d+\s*;?/gi, '')
-        .replace(/min-width\s*:\s*(?:\d{4,}px|100vw)\s*;?/gi, '')
-        .replace(/width\s*:\s*100vw\s*;?/gi, '')
-        .trim();
-      return cleanedStyle ? ` style=${quote}${cleanedStyle}${quote}` : '';
+  const sanitizeMailHtml = (html: string) => {
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    parsed.querySelectorAll('script, style, link, meta, base, iframe, object, embed').forEach(element => element.remove());
+    parsed.querySelectorAll('*').forEach((element) => {
+      Array.from(element.attributes).forEach((attribute) => {
+        const name = attribute.name.toLowerCase();
+        const value = attribute.value.trim();
+        if (name.startsWith('on') || name === 'srcdoc') {
+          element.removeAttribute(attribute.name);
+          return;
+        }
+        if (['href', 'src', 'xlink:href', 'action', 'formaction'].includes(name)
+          && /^(?:javascript|vbscript):/i.test(value)) {
+          element.removeAttribute(attribute.name);
+          return;
+        }
+        if (name === 'style') {
+          const cleanedStyle = value
+            .replace(/(?:position\s*:\s*(?:fixed|absolute|sticky)|z-index\s*:\s*-?\d+|behavior\s*:|(?:-moz-)?binding\s*:)[^;]*(?:;|$)/gi, '')
+            .replace(/(?:min-width|max-width|width)\s*:\s*(?:\d{4,}px|100vw)[^;]*(?:;|$)/gi, '')
+            .trim();
+          if (cleanedStyle) element.setAttribute('style', cleanedStyle);
+          else element.removeAttribute('style');
+        }
+      });
     });
+    return parsed.body.innerHTML;
+  };
   const rawEmailBodyForDisplay = activeEmail && mailHasRemoteImages && !shouldRenderRemoteImages
     ? maskRemoteImages(activeEmail.body || '')
     : (activeEmail?.body || '');
   const rawEmailBodyLooksHtml = /^\\s*</.test(rawEmailBodyForDisplay) || /<[a-z][\\s\\S]*>/i.test(rawEmailBodyForDisplay);
-  const activeEmailBodyForDisplay = rawEmailBodyLooksHtml
+  const activeEmailBodyForDisplay = React.useMemo(() => rawEmailBodyLooksHtml
     ? sanitizeMailHtml(rawEmailBodyForDisplay)
-    : rawEmailBodyForDisplay;
+    : rawEmailBodyForDisplay, [rawEmailBodyForDisplay, rawEmailBodyLooksHtml]);
+  const mailBodyUsesDarkColors = document.documentElement.classList.contains('dark');
+  const mailBodyFrameDocument = React.useMemo(() => {
+    const foreground = mailBodyUsesDarkColors ? '#e2e8f0' : '#1f2937';
+    const background = mailBodyUsesDarkColors ? '#141a29' : '#ffffff';
+    return `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{margin:0;padding:0;width:100%;min-width:0;max-width:100%;background:${background};color:${foreground};font:14px/1.55 Arial,sans-serif;overflow-wrap:anywhere;word-break:normal}
+*,*::before,*::after{box-sizing:border-box}
+body *{min-width:0!important;max-width:100%!important}
+table,tbody,thead,tfoot,tr,td,th,div,section,article,header,footer,main{max-width:100%!important}
+table{width:auto!important;border-collapse:collapse}
+td,th{overflow-wrap:anywhere}
+img,video,svg,canvas{max-width:100%!important;height:auto!important}
+pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
+a{color:#0078d4;cursor:pointer}
+</style></head><body>${activeEmailBodyForDisplay}</body></html>`;
+  }, [activeEmailBodyForDisplay, mailBodyUsesDarkColors]);
   const formatAddressList = (value?: string) => (value || '')
     .split(/[;,]/)
     .map(part => part.trim())
@@ -290,95 +317,124 @@ export default function ReadingPane({
     document.body.removeChild(a);
   };
 
-  // Hook to bind event listeners on any rendered images within rich mail content
-  React.useEffect(() => {
+  const mailBodyFrameRef = React.useRef<HTMLIFrameElement>(null);
+  const mailBodyFrameCleanupRef = React.useRef<(() => void) | null>(null);
+
+  const bindMailBodyFrame = () => {
+    mailBodyFrameCleanupRef.current?.();
+    mailBodyFrameCleanupRef.current = null;
     setImageActionPopup(null);
     setImageContextMenu(null);
 
-    // Timeout allows DOM parsing of dangerouslySetInnerHTML to complete
-    const timeout = setTimeout(() => {
-      const richBody = document.querySelector('.rich-email-content');
-      if (!richBody) return;
+    const frame = mailBodyFrameRef.current;
+    const frameDocument = frame?.contentDocument;
+    if (!frame || !frameDocument) return;
 
-      const links = richBody.querySelectorAll('a[href]');
-      links.forEach((link) => {
-        const handleLinkClick = (event: Event) => {
-          const href = (link as HTMLAnchorElement).href;
-          if (!href) return;
-          event.preventDefault();
-          event.stopPropagation();
+    const resizeFrame = () => {
+      const measuredHeight = Math.max(
+        frameDocument.body?.scrollHeight || 0,
+        frameDocument.documentElement?.scrollHeight || 0,
+        300
+      );
+      frame.style.height = `${Math.min(measuredHeight, 24000)}px`;
+    };
+    const targetElement = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      return target && typeof target.closest === 'function' ? target : null;
+    };
+    const handleClick = (event: MouseEvent) => {
+      const target = targetElement(event);
+      const link = target?.closest('a[href]') as HTMLAnchorElement | null;
+      if (link) {
+        event.preventDefault();
+        event.stopPropagation();
+        const href = link.href;
+        if (/^(?:https?:|mailto:)/i.test(href)) {
           const nativeApi = (window as any).uniqueMailNative;
           if (nativeApi?.openExternal) nativeApi.openExternal(href);
           else window.open(href, '_blank', 'noopener,noreferrer');
-        };
-        link.addEventListener('click', handleLinkClick);
+        }
+        return;
+      }
+
+      const image = target?.closest('img') as HTMLImageElement | null;
+      if (!image) return;
+      event.stopPropagation();
+      frameDocument.querySelectorAll('img[data-unique-mail-selected]').forEach((item) => {
+        (item as HTMLImageElement).style.outline = 'none';
+        item.removeAttribute('data-unique-mail-selected');
       });
-      const imgs = richBody.querySelectorAll('img');
-      imgs.forEach((img) => {
-        // Style and configure image
-        img.style.cursor = 'context-menu';
-        img.style.outline = 'none';
-        img.tabIndex = 0; // Enables keyboard focus and Ctrl+C capture
-
-        const handleMouseEnter = (event: MouseEvent) => {
-          const rect = img.getBoundingClientRect();
-          const pane = document.getElementById('email-details-pane');
-          if (pane) {
-            const paneRect = pane.getBoundingClientRect();
-            // Align relative to relative parent container 'email-details-pane'
-            setImageActionPopup({
-              url: img.src,
-              x: rect.right - paneRect.left - 130,
-              y: rect.top - paneRect.top + 10
-            });
-          }
-        };
-
-        const handleContextMenu = (event: MouseEvent) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const pane = document.getElementById('email-details-pane');
-          if (pane) {
-            const paneRect = pane.getBoundingClientRect();
-            setImageContextMenu({
-              url: img.src,
-              x: event.clientX - paneRect.left,
-              y: event.clientY - paneRect.top
-            });
-            setImageActionPopup(null); // Clear hover toolbar
-          }
-        };
-
-        const handleClick = (e: MouseEvent) => {
-          e.stopPropagation();
-          img.focus();
-          // Visual selection ring indicator
-          img.style.outline = '3px solid #0078d4';
-          img.style.outlineOffset = '2px';
-        };
-
-        const handleBlur = () => {
-          img.style.outline = 'none';
-        };
-
-        const handleKeyDown = (e: KeyboardEvent) => {
-          // Detect Ctrl+C or Cmd+C copy triggers
-          if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
-            e.preventDefault();
-            triggerImageCopy(img.src);
-          }
-        };
-
-        img.addEventListener('mouseenter', handleMouseEnter);
-        img.addEventListener('contextmenu', handleContextMenu);
-        img.addEventListener('click', handleClick);
-        img.addEventListener('blur', handleBlur);
-        img.addEventListener('keydown', handleKeyDown);
+      image.tabIndex = 0;
+      image.focus();
+      image.dataset.uniqueMailSelected = 'true';
+      image.style.outline = '3px solid #0078d4';
+      image.style.outlineOffset = '2px';
+    };
+    const handleMouseOver = (event: MouseEvent) => {
+      const image = targetElement(event)?.closest('img') as HTMLImageElement | null;
+      if (!image || image.contains(event.relatedTarget as Node | null)) return;
+      image.style.cursor = 'context-menu';
+      image.tabIndex = 0;
+      const pane = document.getElementById('mail-reading-pane');
+      if (!pane) return;
+      const imageRect = image.getBoundingClientRect();
+      const frameRect = frame.getBoundingClientRect();
+      const paneRect = pane.getBoundingClientRect();
+      setImageActionPopup({
+        url: image.src,
+        x: frameRect.left + imageRect.right - paneRect.left - 130,
+        y: frameRect.top + imageRect.top - paneRect.top + 10
       });
-    }, 200);
+    };
+    const handleContextMenu = (event: MouseEvent) => {
+      const image = targetElement(event)?.closest('img') as HTMLImageElement | null;
+      if (!image) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const pane = document.getElementById('mail-reading-pane');
+      if (!pane) return;
+      const frameRect = frame.getBoundingClientRect();
+      const paneRect = pane.getBoundingClientRect();
+      setImageContextMenu({
+        url: image.src,
+        x: frameRect.left + event.clientX - paneRect.left,
+        y: frameRect.top + event.clientY - paneRect.top
+      });
+      setImageActionPopup(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const image = targetElement(event)?.closest('img') as HTMLImageElement | null;
+      if (!image || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c') return;
+      event.preventDefault();
+      triggerImageCopy(image.src);
+    };
+    const handleFocusOut = (event: FocusEvent) => {
+      const image = targetElement(event)?.closest('img') as HTMLImageElement | null;
+      if (image) image.style.outline = 'none';
+    };
 
-    return () => clearTimeout(timeout);
-  }, [activeEmailBodyForDisplay, selectedEmailId, currentPage]);
+    frameDocument.addEventListener('click', handleClick, true);
+    frameDocument.addEventListener('mouseover', handleMouseOver, true);
+    frameDocument.addEventListener('contextmenu', handleContextMenu, true);
+    frameDocument.addEventListener('keydown', handleKeyDown, true);
+    frameDocument.addEventListener('focusout', handleFocusOut, true);
+    frameDocument.querySelectorAll('img').forEach((image) => image.addEventListener('load', resizeFrame));
+    const observer = new ResizeObserver(resizeFrame);
+    observer.observe(frameDocument.documentElement);
+    frame.contentWindow?.requestAnimationFrame(resizeFrame);
+
+    mailBodyFrameCleanupRef.current = () => {
+      observer.disconnect();
+      frameDocument.removeEventListener('click', handleClick, true);
+      frameDocument.removeEventListener('mouseover', handleMouseOver, true);
+      frameDocument.removeEventListener('contextmenu', handleContextMenu, true);
+      frameDocument.removeEventListener('keydown', handleKeyDown, true);
+      frameDocument.removeEventListener('focusout', handleFocusOut, true);
+      frameDocument.querySelectorAll('img').forEach((image) => image.removeEventListener('load', resizeFrame));
+    };
+  };
+
+  React.useEffect(() => () => mailBodyFrameCleanupRef.current?.(), []);
 
   // General click handler dismisses active contextual popup overlays
   React.useEffect(() => {
@@ -1033,7 +1089,7 @@ export default function ReadingPane({
     }
 
     return (
-      <div id="mail-reading-pane" className="flex-1 bg-white flex flex-col h-full overflow-y-auto font-sans relative select-none">
+      <div id="mail-reading-pane" className="flex-1 min-w-0 max-w-full bg-white flex flex-col h-full overflow-y-auto overflow-x-hidden font-sans relative select-none contain-layout">
         
         {/* Wiedervorlage Banner */}
         {activeEmail.isFlagged && (
@@ -1258,14 +1314,21 @@ export default function ReadingPane({
             </div>
           </div>
         )}        {/* Email Rich Body text */}
-        <div className="flex-1 p-6 text-xs text-slate-800 dark:text-slate-200 leading-6 border-b border-dashed border-slate-350 dark:border-slate-800 min-h-[300px]">
+        <div className="flex-1 min-w-0 max-w-full p-6 text-xs text-slate-800 dark:text-slate-200 leading-6 border-b border-dashed border-slate-350 dark:border-slate-800 min-h-[300px] overflow-hidden">
           {isHtml(activeEmailBodyForDisplay) ? (
-            <div 
-              className="rich-email-content font-sans select-text text-sm leading-relaxed text-slate-850 dark:text-slate-100"
-              dangerouslySetInnerHTML={{ __html: activeEmailBodyForDisplay }}
+            <iframe
+              key={`${selectedEmailId || 'mail'}-${shouldRenderRemoteImages ? 'remote' : 'blocked'}-${mailBodyUsesDarkColors ? 'dark' : 'light'}`}
+              ref={mailBodyFrameRef}
+              title="Isolierter E-Mail-Inhalt"
+              className="rich-email-frame block w-full min-w-0 max-w-full border-0 bg-transparent"
+              style={{ height: 300 }}
+              sandbox="allow-same-origin"
+              referrerPolicy="no-referrer"
+              srcDoc={mailBodyFrameDocument}
+              onLoad={bindMailBodyFrame}
             />
           ) : (
-            <pre className="font-sans whitespace-pre-wrap select-text text-xs text-slate-700 dark:text-slate-300 leading-6">
+            <pre className="font-sans whitespace-pre-wrap break-words select-text text-xs text-slate-700 dark:text-slate-300 leading-6 max-w-full overflow-x-auto">
               {activeEmailBodyForDisplay}
             </pre>
           )}
@@ -1422,6 +1485,7 @@ export default function ReadingPane({
                 <button
                   key={date.toISOString()}
                   type="button"
+                  data-calendar-day={formatCalendarInputDate(date)}
                   title="Doppelklick: Termin an diesem Tag erfassen"
                   onClick={() => undefined}
                   onDoubleClick={(event) => {
@@ -1458,7 +1522,7 @@ export default function ReadingPane({
         </div>
 
         {calendarDraft && (
-          <div className="mx-6 mb-6 rounded-xl border border-green-200 bg-green-50/80 shadow-sm overflow-hidden">
+          <div data-calendar-event-dialog className="mx-6 mb-6 rounded-xl border border-green-200 bg-green-50/80 shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-green-200 bg-white/70 flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs font-extrabold text-green-900 uppercase tracking-wider">
                 <Calendar className="w-4 h-4 text-green-600" />
@@ -1469,7 +1533,7 @@ export default function ReadingPane({
             <div className="p-4 grid grid-cols-2 gap-3 text-xs">
               <label className="col-span-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
                 Titel
-                <input autoFocus value={calendarDraft.title} onChange={(e) => setCalendarDraft(prev => prev ? { ...prev, title: e.target.value } : prev)} className="mt-1 w-full rounded-lg border border-green-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-green-500/20" />
+                <input data-calendar-event-title autoFocus value={calendarDraft.title} onChange={(e) => setCalendarDraft(prev => prev ? { ...prev, title: e.target.value } : prev)} className="mt-1 w-full rounded-lg border border-green-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-green-500/20" />
               </label>
               <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
                 Datum
@@ -1493,7 +1557,7 @@ export default function ReadingPane({
               </label>
               <div className="col-span-2 flex justify-end gap-2 border-t border-green-200 pt-3">
                 <button type="button" onClick={() => setCalendarDraft(null)} className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 font-bold hover:bg-slate-50">Abbrechen</button>
-                <button type="button" onClick={saveCalendarDraft} disabled={!calendarDraft.title.trim()} className="px-4 py-2 rounded-lg bg-green-600 text-white font-extrabold hover:bg-green-700 disabled:opacity-45 disabled:cursor-not-allowed">Speichern</button>
+                <button data-calendar-event-save type="button" onClick={saveCalendarDraft} disabled={!calendarDraft.title.trim()} className="px-4 py-2 rounded-lg bg-green-600 text-white font-extrabold hover:bg-green-700 disabled:opacity-45 disabled:cursor-not-allowed">Speichern</button>
               </div>
             </div>
           </div>
