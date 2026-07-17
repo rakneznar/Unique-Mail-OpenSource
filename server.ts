@@ -886,7 +886,8 @@ async function startServer() {
         let lock;
         try {
           lock = await client.getMailboxLock(folderInfo.path);
-          const messageCount = Number(client.mailbox?.exists || 0);
+          const mailbox = client.mailbox;
+          const messageCount = mailbox && typeof mailbox === "object" ? Number(mailbox.exists || 0) : 0;
           if (messageCount <= 0) continue;
           const moveResult: any = await client.messageMove("1:*", destinationFolder);
           movedMessages += messageCount;
