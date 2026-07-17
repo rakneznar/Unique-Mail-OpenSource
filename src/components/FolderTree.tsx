@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Inbox, Send, Trash2, Archive, Folder, ChevronDown, ChevronRight, Star, 
   Search, ShieldAlert, FileText, Settings, AppWindow, Database, RefreshCw, X
@@ -51,6 +52,12 @@ interface FolderTreeProps {
   activeAccountEmail: string;
   setActiveAccountEmail: (email: string) => void;
   onMoveEmailsToFolder?: (ids: string[], folderId: string) => void;
+  onMoveFolder?: (request: {
+    accountEmail: string;
+    sourceFolder: string;
+    destinationFolder: string;
+    mode: 'nest' | 'merge';
+  }) => Promise<void> | void;
 }
 
 export default function FolderTree({
@@ -61,9 +68,17 @@ export default function FolderTree({
   accounts,
   activeAccountEmail,
   setActiveAccountEmail,
-  onMoveEmailsToFolder
+  onMoveEmailsToFolder,
+  onMoveFolder
 }: FolderTreeProps) {
   type FavoriteFolderEntry = { accountEmail: string; id: string; label: string };
+  type PendingFolderDrop = {
+    accountEmail: string;
+    sourceFolder: string;
+    sourceLabel: string;
+    destinationFolder: string;
+    destinationLabel: string;
+  };
 
   const normalizeFavoriteFolders = (value: unknown): FavoriteFolderEntry[] => {
     if (!Array.isArray(value)) return [];
@@ -91,6 +106,10 @@ export default function FolderTree({
   // Track collapsed state for accounts
   const [collapsedAccounts, setCollapsedAccounts] = useState<Record<string, boolean>>({});
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [draggedFolderKey, setDraggedFolderKey] = useState<string | null>(null);
+  const [pendingFolderDrop, setPendingFolderDrop] = useState<PendingFolderDrop | null>(null);
+  const [folderMoveError, setFolderMoveError] = useState('');
+  const [isMovingFolder, setIsMovingFolder] = useState(false);
   const [favoriteFolderEntries, setFavoriteFolderEntries] = useState<FavoriteFolderEntry[]>(() => {
     try {
       const saved = localStorage.getItem('uniquemail_folder_favorites');
@@ -296,18 +315,20 @@ export default function FolderTree({
             icon: inferFolderIcon(path, folder.specialUse),
             count: countFromServer ?? getFolderUnreadCount(account.email, id),
             depth: inferredDepth,
+            delimiter: folder.delimiter || '/',
+            specialUse: folder.specialUse || null,
             isSelectable: !(folder.flags || []).some((flag: string) => flag.toLowerCase() === '\\noselect')
           };
         });
     }
 
     const base = [
-      { id: 'inbox', label: 'Posteingang', title: 'Posteingang', icon: Inbox, count: getFolderUnreadCount(account.email, 'inbox'), depth: 0, isSelectable: true },
-      { id: 'drafts', label: 'Entwürfe', title: 'Entwürfe', icon: FileText, count: getFolderUnreadCount(account.email, 'drafts'), depth: 0, isSelectable: true },
-      { id: 'sent', label: 'Gesendete Elemente', title: 'Gesendete Elemente', icon: Send, count: getFolderUnreadCount(account.email, 'sent'), depth: 0, isSelectable: true },
-      { id: 'deleted', label: 'Gelöschte Elemente', title: 'Gelöschte Elemente', icon: Trash2, count: getFolderUnreadCount(account.email, 'deleted'), depth: 0, isSelectable: true },
-      { id: 'junk', label: 'Junk-E-Mail', title: 'Junk-E-Mail', icon: ShieldAlert, count: getFolderUnreadCount(account.email, 'junk'), depth: 0, isSelectable: true },
-      { id: 'archive', label: 'Archiv', title: 'Archiv', icon: Archive, count: getFolderUnreadCount(account.email, 'archive'), depth: 0, isSelectable: true },
+      { id: 'inbox', label: 'Posteingang', title: 'Posteingang', icon: Inbox, count: getFolderUnreadCount(account.email, 'inbox'), depth: 0, delimiter: '/', specialUse: '\\Inbox', isSelectable: true },
+      { id: 'drafts', label: 'Entwürfe', title: 'Entwürfe', icon: FileText, count: getFolderUnreadCount(account.email, 'drafts'), depth: 0, delimiter: '/', specialUse: '\\Drafts', isSelectable: true },
+      { id: 'sent', label: 'Gesendete Elemente', title: 'Gesendete Elemente', icon: Send, count: getFolderUnreadCount(account.email, 'sent'), depth: 0, delimiter: '/', specialUse: '\\Sent', isSelectable: true },
+      { id: 'deleted', label: 'Gelöschte Elemente', title: 'Gelöschte Elemente', icon: Trash2, count: getFolderUnreadCount(account.email, 'deleted'), depth: 0, delimiter: '/', specialUse: '\\Trash', isSelectable: true },
+      { id: 'junk', label: 'Junk-E-Mail', title: 'Junk-E-Mail', icon: ShieldAlert, count: getFolderUnreadCount(account.email, 'junk'), depth: 0, delimiter: '/', specialUse: '\\Junk', isSelectable: true },
+      { id: 'archive', label: 'Archiv', title: 'Archiv', icon: Archive, count: getFolderUnreadCount(account.email, 'archive'), depth: 0, delimiter: '/', specialUse: '\\Archive', isSelectable: true },
     ];
 
     if (account.customFolders) {
@@ -319,6 +340,8 @@ export default function FolderTree({
           icon: Folder,
           count: getFolderUnreadCount(account.email, cf),
           depth: Math.max(0, cf.split(/[\\/]/).length - 1),
+          delimiter: '/',
+          specialUse: null,
           isSelectable: true
         });
       });
@@ -347,17 +370,104 @@ export default function FolderTree({
     setCollapsedFolders(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const handleFolderDrop = (event: React.DragEvent, accountEmail: string, folderId: string, selectable: boolean) => {
+  const protectedFolderPattern = /^(?:inbox|posteingang|sent|gesendet(?:e elemente)?|drafts?|entw(?:u|ü)rfe|trash|deleted|papierkorb|junk|spam|archive|archiv|outbox|postausgang)$/i;
+  const canMoveFolder = (folder: { id: string; label: string; specialUse?: string | null; isSelectable?: boolean }) => {
+    const leaf = folder.id.split(/[\\/.]/).pop() || folder.label;
+    return folder.isSelectable !== false && !folder.specialUse && !protectedFolderPattern.test(leaf.trim());
+  };
+
+  const handleFolderDragStart = (
+    event: React.DragEvent,
+    accountEmail: string,
+    folder: { id: string; label: string; delimiter?: string; specialUse?: string | null; isSelectable?: boolean }
+  ) => {
+    if (!canMoveFolder(folder)) {
+      event.preventDefault();
+      return;
+    }
+    const payload = JSON.stringify({
+      accountEmail,
+      folderId: folder.id,
+      label: folder.label,
+      delimiter: folder.delimiter || '/'
+    });
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('application/x-unique-mail-folder', payload);
+    event.dataTransfer.setData('text/plain', `unique-mail-folder:${payload}`);
+    setDraggedFolderKey(folderNodeKey(accountEmail, folder.id));
+  };
+
+  const handleFolderDrop = (
+    event: React.DragEvent,
+    accountEmail: string,
+    folder: { id: string; label: string; isSelectable?: boolean }
+  ) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!selectable) return;
+    setDraggedFolderKey(null);
+    const rawFolderPayload = event.dataTransfer.getData('application/x-unique-mail-folder');
+    if (rawFolderPayload) {
+      try {
+        const source = JSON.parse(rawFolderPayload) as { accountEmail?: string; folderId?: string; label?: string; delimiter?: string };
+        const sourceAccount = String(source.accountEmail || '').trim();
+        const sourceFolder = String(source.folderId || '').trim();
+        const delimiter = String(source.delimiter || '/');
+        if (!sourceAccount || !sourceFolder) return;
+        if (sourceAccount.toLowerCase() !== accountEmail.toLowerCase()) {
+          window.alert('Ordner können nur innerhalb desselben E-Mail-Kontos verschoben werden.');
+          return;
+        }
+        const sourceKey = sourceFolder.toLowerCase();
+        const destinationKey = folder.id.toLowerCase();
+        if (sourceKey === destinationKey || destinationKey.startsWith(sourceKey + delimiter.toLowerCase())) {
+          window.alert('Ein Ordner kann nicht in sich selbst oder einen eigenen Unterordner verschoben werden.');
+          return;
+        }
+        setFolderMoveError('');
+        setPendingFolderDrop({
+          accountEmail,
+          sourceFolder,
+          sourceLabel: String(source.label || sourceFolder),
+          destinationFolder: folder.id,
+          destinationLabel: folder.label
+        });
+        return;
+      } catch {
+        window.alert('Die Ordner-Verschiebedaten konnten nicht gelesen werden.');
+        return;
+      }
+    }
+    if (folder.isSelectable === false) return;
     const payload = event.dataTransfer.getData('application/x-unique-mail-ids') || event.dataTransfer.getData('text/plain');
-    const ids = payload.trim().startsWith('[')
-      ? JSON.parse(payload)
-      : payload.split(',').map(item => item.trim()).filter(Boolean);
-    if (Array.isArray(ids) && ids.length > 0) {
-      setActiveAccountEmail(accountEmail);
-      onMoveEmailsToFolder?.(ids, folderId);
+    try {
+      const ids = payload.trim().startsWith('[')
+        ? JSON.parse(payload)
+        : payload.split(',').map(item => item.trim()).filter(Boolean);
+      if (Array.isArray(ids) && ids.length > 0) {
+        setActiveAccountEmail(accountEmail);
+        onMoveEmailsToFolder?.(ids, folder.id);
+      }
+    } catch {
+      // Ignore drag payloads that do not belong to Unique Mail messages.
+    }
+  };
+
+  const executeFolderDrop = async (mode: 'nest' | 'merge') => {
+    if (!pendingFolderDrop || !onMoveFolder || isMovingFolder) return;
+    setIsMovingFolder(true);
+    setFolderMoveError('');
+    try {
+      await onMoveFolder({
+        accountEmail: pendingFolderDrop.accountEmail,
+        sourceFolder: pendingFolderDrop.sourceFolder,
+        destinationFolder: pendingFolderDrop.destinationFolder,
+        mode
+      });
+      setPendingFolderDrop(null);
+    } catch (error: any) {
+      setFolderMoveError(error?.message || 'Der Ordner konnte nicht verschoben werden.');
+    } finally {
+      setIsMovingFolder(false);
     }
   };
   const handleFolderClick = (accountEmail: string, folderId: string) => {
@@ -366,6 +476,7 @@ export default function FolderTree({
   };
 
   return (
+    <>
     <div 
       id="folder-tree-sidebar" 
       className="w-64 bg-slate-50 border-r border-[#e2e8f0] flex flex-col h-full font-sans select-none shrink-0"
@@ -513,11 +624,21 @@ export default function FolderTree({
                     return (
                       <button
                         id={`account-folder-${account.email}-${folder.id}`}
+                        data-folder-path={folder.id}
+                        data-folder-account={account.email}
+                        data-folder-movable={canMoveFolder(folder) ? 'true' : 'false'}
                         key={`${account.email}-${folder.id}`}
                         onClick={() => folder.isSelectable !== false && handleFolderClick(account.email, folder.id)}
                         onDragOver={(e) => { if (folder.isSelectable !== false) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
-                        onDrop={(e) => handleFolderDrop(e, account.email, folder.id, folder.isSelectable !== false)}
+                        onDrop={(e) => handleFolderDrop(e, account.email, folder)}
+                        draggable={canMoveFolder(folder)}
+                        onDragStart={(e) => handleFolderDragStart(e, account.email, folder)}
+                        onDragEnd={() => setDraggedFolderKey(null)}
                         className={`w-full text-left flex items-center justify-between px-3.5 py-1.5 text-xs rounded-lg transition-colors duration-75 cursor-pointer ${
+                          draggedFolderKey === folderNodeKey(account.email, folder.id)
+                            ? 'opacity-45 border border-dashed border-[#0078d4] '
+                            : ''
+                        }${
                           isSelected
                             ? 'bg-[#0078d4]/10 text-[#005a9e] font-semibold border-l-3 border-[#0078d4]'
                             : folder.isSelectable === false
@@ -600,6 +721,65 @@ export default function FolderTree({
         </div>
       )}
     </div>
+    {pendingFolderDrop && createPortal(
+      <div
+        id="folder-drop-choice-modal"
+        className="fixed inset-0 z-[10050] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[1px]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="folder-drop-choice-title"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !isMovingFolder) setPendingFolderDrop(null);
+        }}
+      >
+        <div className="w-[520px] max-w-full border border-slate-300 bg-white shadow-2xl text-slate-800">
+          <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
+            <h2 id="folder-drop-choice-title" className="text-sm font-extrabold">Ordner verschieben</h2>
+            <p className="mt-1 text-[11px] text-slate-500">
+              „{pendingFolderDrop.sourceLabel}“ wurde auf „{pendingFolderDrop.destinationLabel}“ gezogen.
+            </p>
+          </div>
+          <div className="space-y-3 p-5">
+            <button
+              id="folder-drop-nest-button"
+              type="button"
+              disabled={isMovingFolder}
+              onClick={() => executeFolderDrop('nest')}
+              className="w-full border border-[#0078d4] bg-[#0078d4] px-4 py-3 text-left text-white hover:bg-[#005a9e] disabled:opacity-60"
+            >
+              <span className="block text-xs font-extrabold">Als Unterordner verschieben</span>
+              <span className="mt-1 block text-[10.5px] text-blue-100">Der Ordner und seine Unterordner bleiben erhalten und werden unter dem Ziel eingeordnet.</span>
+            </button>
+            <button
+              id="folder-drop-merge-button"
+              type="button"
+              disabled={isMovingFolder}
+              onClick={() => executeFolderDrop('merge')}
+              className="w-full border border-slate-300 bg-white px-4 py-3 text-left hover:bg-slate-50 disabled:opacity-60"
+            >
+              <span className="block text-xs font-extrabold text-slate-800">Inhalt in Zielordner migrieren</span>
+              <span className="mt-1 block text-[10.5px] text-slate-500">Alle Nachrichten aus diesem Ordner und seinen Unterordnern werden in den Zielordner verschoben; der Quellordner wird danach entfernt.</span>
+            </button>
+            {folderMoveError && (
+              <p className="border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">{folderMoveError}</p>
+            )}
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-3">
+            <span className="text-[10px] text-slate-500">{isMovingFolder ? 'Serveränderung wird ausgeführt...' : 'Die Änderung wird direkt mit dem IMAP-Server synchronisiert.'}</span>
+            <button
+              type="button"
+              disabled={isMovingFolder}
+              onClick={() => setPendingFolderDrop(null)}
+              className="border border-slate-300 bg-white px-4 py-1.5 text-[11px] font-bold hover:bg-slate-100 disabled:opacity-60"
+            >
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
   );
 }
 

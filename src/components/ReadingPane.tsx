@@ -422,12 +422,19 @@ a{color:#0078d4;cursor:pointer}
       const image = targetElement(event)?.closest('img') as HTMLImageElement | null;
       if (image) image.style.outline = 'none';
     };
+    const handleWheel = (event: WheelEvent) => {
+      const scrollContainer = document.getElementById('mail-message-scroll');
+      if (!scrollContainer || (!event.deltaX && !event.deltaY)) return;
+      event.preventDefault();
+      scrollContainer.scrollBy({ left: event.deltaX, top: event.deltaY, behavior: 'auto' });
+    };
 
     frameDocument.addEventListener('click', handleClick, true);
     frameDocument.addEventListener('mouseover', handleMouseOver, true);
     frameDocument.addEventListener('contextmenu', handleContextMenu, true);
     frameDocument.addEventListener('keydown', handleKeyDown, true);
     frameDocument.addEventListener('focusout', handleFocusOut, true);
+    frameDocument.addEventListener('wheel', handleWheel, { capture: true, passive: false });
     frameDocument.querySelectorAll('img').forEach((image) => image.addEventListener('load', resizeFrame));
     const observer = new ResizeObserver(resizeFrame);
     observer.observe(frameDocument.documentElement);
@@ -440,6 +447,7 @@ a{color:#0078d4;cursor:pointer}
       frameDocument.removeEventListener('contextmenu', handleContextMenu, true);
       frameDocument.removeEventListener('keydown', handleKeyDown, true);
       frameDocument.removeEventListener('focusout', handleFocusOut, true);
+      frameDocument.removeEventListener('wheel', handleWheel, true);
       frameDocument.querySelectorAll('img').forEach((image) => image.removeEventListener('load', resizeFrame));
     };
   };
@@ -1099,7 +1107,7 @@ a{color:#0078d4;cursor:pointer}
     }
 
     return (
-      <div id="mail-reading-pane" className="flex-1 min-w-0 max-w-full bg-white flex flex-col h-full overflow-y-auto overflow-x-hidden font-sans relative select-none contain-layout">
+      <div id="mail-reading-pane" className="flex-1 min-w-0 max-w-full bg-white flex flex-col h-full min-h-0 overflow-hidden font-sans relative select-none contain-layout">
         
         {/* Wiedervorlage Banner */}
         {activeEmail.isFlagged && (
@@ -1324,7 +1332,13 @@ a{color:#0078d4;cursor:pointer}
             </div>
           </div>
         )}        {/* Email Rich Body text */}
-        <div className="flex-1 min-w-0 max-w-full p-6 text-xs text-slate-800 dark:text-slate-200 leading-6 border-b border-dashed border-slate-350 dark:border-slate-800 min-h-[300px] overflow-hidden">
+        <div
+          id="mail-message-scroll"
+          data-mail-message-scroll
+          tabIndex={0}
+          className="flex-1 min-h-0 min-w-0 max-w-full p-6 text-xs text-slate-800 dark:text-slate-200 leading-6 border-b border-dashed border-slate-350 dark:border-slate-800 overflow-y-auto overflow-x-hidden overscroll-contain focus:outline-none"
+          aria-label="Nachrichteninhalt"
+        >
           {isHtml(activeEmailBodyForDisplay) ? (
             <iframe
               key={`${selectedEmailId || 'mail'}-${shouldRenderRemoteImages ? 'remote' : 'blocked'}-${mailBodyUsesDarkColors ? 'dark' : 'light'}`}

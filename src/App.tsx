@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem }
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.36';
+const APP_VERSION = '0.4.37';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -2619,7 +2619,7 @@ Julia`,
     alert(`Kontakt '${firstName} ${lastName}' wurde erfolgreich im Adressbuch gespeichert.`);
   };
 
-  const [serverDiskCacheLoaded, setServerDiskCacheLoaded] = useState(false);
+  const serverDiskCacheLoadStartedRef = useRef(false);
 
   const mergeSyncedEmails = (previous: Email[], accountEmail: string, syncedEmails: Email[]) => {
     const accountLower = accountEmail.toLowerCase();
@@ -2647,20 +2647,15 @@ Julia`,
   };
 
   useEffect(() => {
-    if (!browserMailCacheLoaded || serverDiskCacheLoaded || accounts.length === 0) return;
-    setServerDiskCacheLoaded(true);
+    if (!browserMailCacheLoaded || serverDiskCacheLoadStartedRef.current || accounts.length === 0) return;
+    serverDiskCacheLoadStartedRef.current = true;
 
-    let cancelled = false;
     void (async () => {
       for (const account of accounts) {
-        if (cancelled) return;
         try {
-          const data = await enqueueBackgroundJob(`startup-cache:${account.email}`, 20, async () => {
-            const response = await fetch(`/api/mail/cache/${encodeURIComponent(account.email)}`);
-            if (!response.ok) return null;
-            return response.json();
-          });
-          if (!data || cancelled) continue;
+          const response = await fetch(`/api/mail/cache/${encodeURIComponent(account.email)}`);
+          const data = response.ok ? await response.json() : null;
+          if (!data) continue;
           const cachedFolders = Array.isArray(data.folders) ? data.folders : [];
           const cachedEmails = Array.isArray(data.emails) ? data.emails : [];
 
@@ -2686,11 +2681,7 @@ Julia`,
         await new Promise(resolve => window.setTimeout(resolve, 25));
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accounts, browserMailCacheLoaded, serverDiskCacheLoaded]);
+  }, [accounts, browserMailCacheLoaded]);
   const getMailUid = (mail: Email) => {
     const fromField = Number(mail.imapUid);
     if (Number.isFinite(fromField) && fromField > 0) return fromField;
@@ -3111,6 +3102,98 @@ Julia`,
         }));
       }
     }
+  };
+
+  const moveFolderOnServer = async (request: {
+    accountEmail: string;
+    sourceFolder: string;
+    destinationFolder: string;
+    mode: 'nest' | 'merge';
+  }) => {
+    const account = accounts.find(item => item.email.toLowerCase() === request.accountEmail.toLowerCase());
+    if (!account) throw new Error('Das E-Mail-Konto des Ordners wurde nicht gefunden.');
+    const password = await getSessionPassword(account);
+    if (!password) throw new Error('Für die Serveränderung wird das gespeicherte Kontopasswort benötigt.');
+
+    setSyncStatusText(request.mode === 'nest' ? 'Ordner wird als Unterordner verschoben...' : 'Ordnerinhalt wird migriert...');
+    const response = await fetch('/api/mail/folders/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: account.email,
+        password,
+        imapServer: account.imapServer,
+        imapPort: account.imapPort,
+        sourceFolder: request.sourceFolder,
+        destinationFolder: request.destinationFolder,
+        mode: request.mode
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Der Ordner konnte auf dem IMAP-Server nicht verschoben werden.');
+
+    const delimiter = String(result.delimiter || '/');
+    const resultingFolder = String(result.resultingFolder || request.destinationFolder);
+    const sourceKey = request.sourceFolder.toLowerCase();
+    const belongsToSourceTree = (folderPath?: string) => {
+      const value = String(folderPath || '').toLowerCase();
+      return value === sourceKey || value.startsWith(sourceKey + delimiter.toLowerCase());
+    };
+    const remapNestedPath = (folderPath: string) => resultingFolder + folderPath.slice(request.sourceFolder.length);
+
+    setEmails(prev => prev.map(mail => {
+      if ((mail.accountEmail || '').toLowerCase() !== account.email.toLowerCase() || !belongsToSourceTree(mail.imapFolder || mail.folder)) return mail;
+      const currentFolder = mail.imapFolder || mail.folder || request.sourceFolder;
+      const nextFolder = request.mode === 'nest' ? remapNestedPath(currentFolder) : request.destinationFolder;
+      return { ...mail, folder: nextFolder, imapFolder: nextFolder };
+    }));
+
+    setAccounts(prev => prev.map(item => {
+      if (item.email.toLowerCase() !== account.email.toLowerCase()) return item;
+      const serverFolders = Array.isArray(item.serverFolders) ? item.serverFolders : [];
+      const nextFolders = request.mode === 'nest'
+        ? serverFolders.map((folder: any) => {
+            const path = String(folder.path || folder.id || '');
+            if (!belongsToSourceTree(path)) return folder;
+            const nextPath = remapNestedPath(path);
+            return {
+              ...folder,
+              id: nextPath,
+              path: nextPath,
+              parentPath: nextPath.includes(delimiter) ? nextPath.slice(0, nextPath.lastIndexOf(delimiter)) : '',
+              depth: nextPath.split(delimiter).length - 1
+            };
+          })
+        : serverFolders.filter((folder: any) => !belongsToSourceTree(String(folder.path || folder.id || '')));
+      return { ...item, serverFolders: nextFolders };
+    }));
+
+    try {
+      const saved = JSON.parse(localStorage.getItem('uniquemail_folder_favorites') || '[]');
+      if (Array.isArray(saved)) {
+        const nextFavorites = saved
+          .map((favorite: any) => {
+            if (String(favorite.accountEmail || '').toLowerCase() !== account.email.toLowerCase() || !belongsToSourceTree(favorite.id)) return favorite;
+            if (request.mode === 'merge') return null;
+            return { ...favorite, id: remapNestedPath(String(favorite.id || '')) };
+          })
+          .filter(Boolean);
+        localStorage.setItem('uniquemail_folder_favorites', JSON.stringify(nextFavorites));
+        window.dispatchEvent(new Event('uniquemail-folder-favorites-updated'));
+      }
+    } catch {
+      // A malformed legacy favorite entry must not block a server-side folder operation.
+    }
+
+    if (selectedFolder === request.sourceFolder || belongsToSourceTree(selectedFolder)) {
+      setSelectedFolder(request.mode === 'nest' ? remapNestedPath(selectedFolder) : request.destinationFolder);
+    }
+    setActiveAccountEmail(account.email);
+    setSyncStatusText(request.mode === 'nest'
+      ? `Ordner nach ${resultingFolder} verschoben und synchronisiert.`
+      : `${Number(result.movedMessages || 0)} Nachricht(en) nach ${request.destinationFolder} migriert und Quellordner entfernt.`
+    );
+    triggerPostActionSync('Ordnerstruktur geändert');
   };
 
   const moveEmailsToSpecificFolder = (ids: string[], destinationFolder: string) => {
@@ -3737,6 +3820,7 @@ Julia`,
                 activeAccountEmail={activeAccountEmail}
                 setActiveAccountEmail={setActiveAccountEmail}
                 onMoveEmailsToFolder={moveEmailsToSpecificFolder}
+                onMoveFolder={moveFolderOnServer}
               />
             )}
 
