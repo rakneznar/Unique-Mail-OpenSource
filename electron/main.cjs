@@ -721,16 +721,6 @@ async function createWindow() {
   await win.loadURL(`http://127.0.0.1:${PORT}`);
 
   await win.webContents.insertCSS(`
-    #unique-window-drag-strip {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 400px;
-      height: 12px;
-      z-index: 2147483646;
-      -webkit-app-region: drag;
-      background: transparent;
-    }
     #unique-window-close-button,
     #unique-window-maximize-button,
     #unique-window-minimize-button,
@@ -980,12 +970,6 @@ async function createWindow() {
     const windowControlsResult = await win.webContents.executeJavaScript(`
     (() => {
       try {
-      if (!document.getElementById('unique-window-drag-strip')) {
-        const drag = document.createElement('div');
-        drag.id = 'unique-window-drag-strip';
-        document.body.appendChild(drag);
-      }
-
       const ensureVersionHistoryDialog = () => {
         let backdrop = document.getElementById('unique-version-history-backdrop');
         if (backdrop) return backdrop;
@@ -996,7 +980,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.37 <span class="unique-version-current">aktuell</span></h3><ul><li>Lange HTML- und Textnachrichten besitzen wieder einen eigenen, zuverlaessigen Scrollbereich; Mausradbewegungen im isolierten Mail-Frame werden korrekt weitergereicht.</li><li>Benutzerdefinierte IMAP-Ordner koennen per Drag-and-drop auf einen anderen Ordner gezogen und als Unterordner eingeordnet werden.</li><li>Beim Ablegen kann alternativ der gesamte Inhalt samt Unterordnern in den Zielordner migriert werden; Systemordner und unzulaessige Kreisverschiebungen bleiben geschuetzt.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.38 <span class="unique-version-current">aktuell</span></h3><ul><li>Die gesamte freie obere Titelzeile dient jetzt als klar nutzbare Ziehflaeche; Logo, Schnellaktionen und Fenstersteuerung bleiben normal anklickbar.</li><li>Vollstaendig gespeicherte Nachrichtentexte und Anhaenge werden direkt aus dem persistenten lokalen Cache geliefert, ohne vorherige IMAP-Verbindung.</li><li>Doppelte Body-Abrufe werden zusammengefuehrt; die ausgewaehlte Mail erhaelt Benutzerprioritaet und benachbarte Mails werden sparsam im Leerlauf vorgeladen.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.37</h3><ul><li>Lange HTML- und Textnachrichten besitzen wieder einen eigenen, zuverlaessigen Scrollbereich; Mausradbewegungen im isolierten Mail-Frame werden korrekt weitergereicht.</li><li>Benutzerdefinierte IMAP-Ordner koennen per Drag-and-drop auf einen anderen Ordner gezogen und als Unterordner eingeordnet werden.</li><li>Beim Ablegen kann alternativ der gesamte Inhalt samt Unterordnern in den Zielordner migriert werden; Systemordner und unzulaessige Kreisverschiebungen bleiben geschuetzt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.36</h3><ul><li>Unter Gemeinsamer Posteingang werden keine Kontoadressen mehr angezeigt; Bezeichnung und gelber Aktivitaetspunkt bleiben bewusst kompakt.</li><li>Der Termin-Editor wird nach einem Doppelklick als garantiert sichtbares, rechts angedocktes In-App-Panel geoeffnet.</li><li>Kalender-Doppelklick, sichtbarer Editor und dauerhaftes Speichern werden gemeinsam in der Desktop-Regression geprueft.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.35</h3><ul><li>HTML-Mails werden in einem skriptlosen, isolierten Dokument gerendert; Newsletter-CSS kann Ribbon, Ordnerbaum und Nachrichtenliste nicht mehr veraendern.</li><li>Breite oder fehlerhafte Mail-Layouts werden auf die Lesebereichsbreite begrenzt und koennen keine App-Spalte mehr zusammendruecken.</li><li>Ribbon und Hauptspalten besitzen feste Flex-Grenzen; bei Platzmangel scrollt das Ribbon, statt Bedienelemente unlesbar zu stauchen.</li><li>Im Ordnerbaum steht entweder der benutzerdefinierte Kontoname oder die E-Mail-Adresse; bei einem Kontonamen erscheint die Adresse nur noch als Hover-Hinweis.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.3.35</h3><ul><li>Appweiter Fokusfehler bei Eingabefeldern behoben: Fensteraktivierung, Renderer-Fokus und editierbare Felder werden zuverlaessig synchronisiert.</li><li>Spezielle Konto-Eventblocker entfernt; Eingaben sind ausdruecklich als nicht ziehbare Textbereiche markiert.</li><li>Backup-Passwort ist optional: Exporte ohne Passwort enthalten alle Einstellungen, aber keine Kontopasswoerter; kennwortfreie JSON-Dateien lassen sich ohne Passwort importieren.</li></ul></article>',
@@ -1124,7 +1109,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.37',
+        '0.4.38',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');

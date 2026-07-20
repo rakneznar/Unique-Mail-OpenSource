@@ -250,9 +250,11 @@ export default function ReadingPane({
     });
     return parsed.body.innerHTML;
   };
+  const activeEmailBodyPending = !!activeEmail?.imapUid && activeEmail.bodyLoaded !== true && !activeEmail.body;
+  const immediateBodyFallback = activeEmailBodyPending ? (activeEmail?.preview || '') : '';
   const rawEmailBodyForDisplay = activeEmail && mailHasRemoteImages && !shouldRenderRemoteImages
     ? maskRemoteImages(activeEmail.body || '')
-    : (activeEmail?.body || '');
+    : (activeEmail?.body || immediateBodyFallback);
   const rawEmailBodyLooksHtml = /^\\s*</.test(rawEmailBodyForDisplay) || /<[a-z][\\s\\S]*>/i.test(rawEmailBodyForDisplay);
   const activeEmailBodyForDisplay = React.useMemo(() => rawEmailBodyLooksHtml
     ? sanitizeMailHtml(rawEmailBodyForDisplay)
@@ -1339,6 +1341,12 @@ a{color:#0078d4;cursor:pointer}
           className="flex-1 min-h-0 min-w-0 max-w-full p-6 text-xs text-slate-800 dark:text-slate-200 leading-6 border-b border-dashed border-slate-350 dark:border-slate-800 overflow-y-auto overflow-x-hidden overscroll-contain focus:outline-none"
           aria-label="Nachrichteninhalt"
         >
+          {activeEmailBodyPending && (
+            <div className="mb-4 flex items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400" role="status">
+              <span className="h-2 w-2 rounded-full bg-[#0078d4] animate-pulse" />
+              Vollstaendiger Inhalt wird aus dem lokalen Cache geladen...
+            </div>
+          )}
           {isHtml(activeEmailBodyForDisplay) ? (
             <iframe
               key={`${selectedEmailId || 'mail'}-${shouldRenderRemoteImages ? 'remote' : 'blocked'}-${mailBodyUsesDarkColors ? 'dark' : 'light'}`}

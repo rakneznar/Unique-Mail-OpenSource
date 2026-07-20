@@ -15,6 +15,7 @@ export interface Email {
   subject: string;
   date: string;
   body: string;
+  bodyLoaded?: boolean;
   preview: string;
   isRead: boolean;
   isFlagged: boolean;

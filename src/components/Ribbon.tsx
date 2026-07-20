@@ -163,8 +163,8 @@ export default function Ribbon({
     <div id="outlook-ribbon" className="w-full min-w-0 max-w-full overflow-hidden bg-slate-50 text-slate-800 flex flex-col select-none border-b border-slate-205 shrink-0 font-sans">
       
       {/* 1. Quick Access Toolbar & App Bar Title */}
-      <div className="h-[48px] min-h-[48px] bg-slate-55 flex items-center justify-between pl-4 pr-44 border-b border-slate-200 text-xs shadow-xs">
-        <div className="flex items-center space-x-3.5">
+      <div data-window-drag-region className="h-[48px] min-h-[48px] bg-slate-55 flex items-center justify-between pl-4 pr-44 border-b border-slate-200 text-xs shadow-xs">
+        <div data-window-no-drag className="flex items-center space-x-3.5">
           {/* Small Icon Brand with rounded-xl corners (Enlarged) */}
           <div className="flex items-center space-x-2.5 cursor-pointer hover:opacity-90 transition-opacity">
             <AppLogo size={36} className="rounded-xl shadow-md shrink-0" />
@@ -218,7 +218,7 @@ export default function Ribbon({
           {currentPage === 'dev' && `Entwicklermodul`}
         </div>
 
-        <div className="w-8" />
+        <div data-window-no-drag className="w-8" />
       </div>
 
       {/* 2. Ribbon Tabs Layout */}

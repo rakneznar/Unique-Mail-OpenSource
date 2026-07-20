@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem }
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.37';
+const APP_VERSION = '0.4.38';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -2620,6 +2620,8 @@ Julia`,
   };
 
   const serverDiskCacheLoadStartedRef = useRef(false);
+  const messageBodyRequestsRef = useRef<Map<string, Promise<void>>>(new Map());
+  const messagePrefetchTimerRef = useRef<number | null>(null);
 
   const mergeSyncedEmails = (previous: Email[], accountEmail: string, syncedEmails: Email[]) => {
     const accountLower = accountEmail.toLowerCase();
@@ -2694,52 +2696,6 @@ Julia`,
     const owner = (mail.accountEmail || activeAccountEmail || '').toLowerCase();
     return accounts.find(acc => acc.email.toLowerCase() === owner) || accounts[0];
   };
-  useEffect(() => {
-    const selectedMail = emails.find(mail => mail.id === selectedEmailId);
-    const bodyLooksBroken = !!selectedMail?.body && (selectedMail.body.includes('\\uFFFD') || /[\\u00c3\\u00c2\\u00e2\\u00c6\\u00c5\\u00f0]/.test(selectedMail.body));
-    if (!selectedMail || !selectedMail.imapUid || !selectedMail.imapFolder) return;
-    const attachmentsNeedFullLoad = !!selectedMail.hasAttachment && (!Array.isArray(selectedMail.attachments) || selectedMail.attachments.length === 0 || selectedMail.attachments.some(item => !item.contentBase64));
-    if (selectedMail.body && !bodyLooksBroken && !attachmentsNeedFullLoad) return;
-    const account = getAccountForMail(selectedMail);
-    if (!account) return;
-
-    let cancelled = false;
-    void (async () => {
-      const password = await getSessionPassword(account);
-      if (!password || cancelled) return;
-
-      await enqueueBackgroundJob(`message-body:${selectedMail.id}`, 100, async () => {
-          const response = await fetch('/api/mail/message-body', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: account.email,
-              password,
-              imapServer: account.imapServer,
-              imapPort: account.imapPort,
-              folder: selectedMail.imapFolder,
-              uid: selectedMail.imapUid
-            })
-          });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.error || 'Nachrichtentext konnte nicht geladen werden.');
-          return data.email as Email | undefined;
-        })
-        .then(fullEmail => {
-          if (!fullEmail || cancelled) return;
-          setEmails(prev => prev.map(mail => mail.id === selectedMail.id ? { ...mail, ...fullEmail } : mail));
-        })
-        .catch(error => {
-          if (!cancelled) setSyncStatusText(`Nachrichtentext konnte nicht geladen werden: ${error.message || error}`);
-        });
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedEmailId, emails, accounts]);
-
-
   const rememberSessionPassword = (email: string, password: string) => {
     setAccountSessionPasswords(prev => ({ ...prev, [email.toLowerCase()]: password }));
   };
@@ -2840,6 +2796,92 @@ Julia`,
     }
     return null;
   };
+
+  const mailBodyNeedsLoading = (mail?: Email) => {
+    if (!mail?.imapUid || !mail.imapFolder) return false;
+    const bodyLooksBroken = !!mail.body && (mail.body.includes('\\uFFFD') || /[\\u00c3\\u00c2\\u00e2\\u00c6\\u00c5\\u00f0]/.test(mail.body));
+    const attachmentsNeedFullLoad = !!mail.hasAttachment
+      && (!Array.isArray(mail.attachments) || mail.attachments.length === 0 || mail.attachments.some(item => typeof item.contentBase64 !== 'string'));
+    return mail.bodyLoaded !== true && (!mail.body || bodyLooksBroken || attachmentsNeedFullLoad);
+  };
+
+  const loadMessageBody = (mail: Email, priority: number, allowPasswordPrompt: boolean, forceRefresh = false): Promise<void> => {
+    const account = getAccountForMail(mail);
+    if (!account || !mail.imapUid || !mail.imapFolder) return Promise.resolve();
+    const requestKey = `${account.email.toLowerCase()}|${mail.imapFolder.toLowerCase()}|${mail.imapUid}`;
+    const existingRequest = messageBodyRequestsRef.current.get(requestKey);
+    if (existingRequest) return existingRequest;
+
+    const fetchBody = async () => {
+      const password = allowPasswordPrompt
+        ? await getSessionPassword(account)
+        : await getStoredAccountPasswordNoPrompt(account);
+      if (!password) return;
+
+      const response = await fetch('/api/mail/message-body', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: account.email,
+          password,
+          imapServer: account.imapServer,
+          imapPort: account.imapPort,
+          folder: mail.imapFolder,
+          uid: mail.imapUid,
+          forceRefresh
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Nachrichtentext konnte nicht geladen werden.');
+      const fullEmail = data.email as Email | undefined;
+      if (!fullEmail) return;
+      setEmails(prev => prev.map(item => item.id === mail.id ? { ...item, ...fullEmail, bodyLoaded: true } : item));
+    };
+
+    const request = (priority >= 100
+      ? fetchBody()
+      : enqueueBackgroundJob(`message-body:${requestKey}`, priority, fetchBody))
+      .catch(error => {
+        if (priority >= 100) setSyncStatusText(`Nachrichtentext konnte nicht geladen werden: ${error.message || error}`);
+      });
+    const trackedRequest = request.finally(() => {
+      if (messageBodyRequestsRef.current.get(requestKey) === trackedRequest) {
+        messageBodyRequestsRef.current.delete(requestKey);
+      }
+    });
+    messageBodyRequestsRef.current.set(requestKey, trackedRequest);
+    return trackedRequest;
+  };
+
+  useEffect(() => {
+    const selectedMail = emails.find(mail => mail.id === selectedEmailId);
+    if (!selectedMail || !mailBodyNeedsLoading(selectedMail)) return;
+    const forceRefresh = !!selectedMail.body && (selectedMail.body.includes('\\uFFFD') || /[\\u00c3\\u00c2\\u00e2\\u00c6\\u00c5\\u00f0]/.test(selectedMail.body));
+    void loadMessageBody(selectedMail, 100, true, forceRefresh);
+  }, [selectedEmailId, emails, accounts]);
+
+  useEffect(() => {
+    if (messagePrefetchTimerRef.current) window.clearTimeout(messagePrefetchTimerRef.current);
+    const selectedMail = emails.find(mail => mail.id === selectedEmailId);
+    if (!selectedMail || !selectedMail.imapFolder) return;
+
+    messagePrefetchTimerRef.current = window.setTimeout(() => {
+      const sameFolder = emails
+        .filter(mail => (mail.accountEmail || '').toLowerCase() === (selectedMail.accountEmail || '').toLowerCase()
+          && normalizeMailFolderKey(mail.imapFolder || mail.folder) === normalizeMailFolderKey(selectedMail.imapFolder || selectedMail.folder))
+        .sort((left, right) => new Date(right.date).getTime() - new Date(left.date).getTime());
+      const selectedIndex = sameFolder.findIndex(mail => mail.id === selectedMail.id);
+      if (selectedIndex < 0) return;
+      [sameFolder[selectedIndex - 1], sameFolder[selectedIndex + 1]]
+        .filter((mail): mail is Email => !!mail && mailBodyNeedsLoading(mail))
+        .forEach(mail => void loadMessageBody(mail, 20, false));
+    }, 650);
+
+    return () => {
+      if (messagePrefetchTimerRef.current) window.clearTimeout(messagePrefetchTimerRef.current);
+      messagePrefetchTimerRef.current = null;
+    };
+  }, [selectedEmailId, emails, accounts]);
 
   const uniqueAccountsForSync = (preferredAccounts: any[] = []) => {
     const active = accounts.find(acc => acc.email.toLowerCase() === activeAccountEmail.toLowerCase()) || accounts[0];

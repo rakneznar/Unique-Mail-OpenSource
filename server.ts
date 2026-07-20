@@ -25,6 +25,7 @@ type MailActionRequest = SyncInboxRequest & {
 type MailBodyRequest = SyncInboxRequest & {
   folder: string;
   uid: number;
+  forceRefresh?: boolean;
 };
 
 type FolderMoveRequest = SyncInboxRequest & {
@@ -298,6 +299,7 @@ function buildEmailFromEnvelope(message: any, folderPath: string, email: string,
     subject,
     date: (message.envelope?.date || new Date()).toISOString(),
     body: "",
+    bodyLoaded: false,
     preview: toTextPreview(subject),
     isRead: flags.has("\\Seen"),
     isFlagged: flags.has("\\Flagged"),
@@ -350,6 +352,7 @@ async function buildEmailFromSource(message: any, folderPath: string, email: str
     subject,
     date: (parsed.date || message.envelope?.date || new Date()).toISOString(),
     body,
+    bodyLoaded: true,
     preview,
     isRead: flags.has("\\Seen"),
     isFlagged: flags.has("\\Flagged"),
@@ -562,10 +565,28 @@ async function startServer() {
   });
 
   app.post("/api/mail/message-body", async (req, res) => {
-    const { email, password, imapServer, imapPort, folder, uid } = req.body as MailBodyRequest;
+    const { email, password, imapServer, imapPort, folder, uid, forceRefresh } = req.body as MailBodyRequest;
     const uidNumber = Number(uid);
 
-    if (!email || !password || !imapServer || !imapPort || !folder || !Number.isFinite(uidNumber) || uidNumber <= 0) {
+    if (!email || !folder || !Number.isFinite(uidNumber) || uidNumber <= 0) {
+      return res.status(400).json({ error: "E-Mail, Ordner und UID sind erforderlich." });
+    }
+
+    const cached = await readMailCache(email);
+    const cachedMail = Array.isArray(cached?.emails)
+      ? cached.emails.find((mail: any) => sameFolder(mail.folder || mail.imapFolder, folder) && getMailUid(mail) === uidNumber)
+      : null;
+    const cachedAttachmentsComplete = !cachedMail?.hasAttachment
+      || (Array.isArray(cachedMail.attachments) && cachedMail.attachments.length > 0
+        && cachedMail.attachments.every((attachment: any) => typeof attachment.contentBase64 === "string"));
+    const cachedBodyComplete = cachedMail?.bodyLoaded === true
+      || (typeof cachedMail?.body === "string" && cachedMail.body.length > 0 && cachedAttachmentsComplete);
+
+    if (!forceRefresh && cachedMail && cachedBodyComplete && cachedAttachmentsComplete) {
+      return res.json({ email: { ...cachedMail, bodyLoaded: true }, cacheHit: true });
+    }
+
+    if (!password || !imapServer || !imapPort) {
       return res.status(400).json({ error: "E-Mail, Passwort, IMAP-Daten, Ordner und UID sind erforderlich." });
     }
 
@@ -592,10 +613,13 @@ async function startServer() {
         return res.status(404).json({ error: "Nachricht wurde im IMAP-Ordner nicht gefunden." });
       }
 
-      const cached = await readMailCache(email);
-      if (cached?.emails) {
+      const cachePayload = cached && typeof cached === "object"
+        ? cached
+        : { emails: [], folders: [], syncedAt: new Date().toISOString() };
+      if (!Array.isArray(cachePayload.emails)) cachePayload.emails = [];
+      if (cachePayload) {
         let replaced = false;
-        cached.emails = cached.emails.map((mail: any) => {
+        cachePayload.emails = cachePayload.emails.map((mail: any) => {
           const cachedUid = getMailUid(mail);
           if (sameFolder(mail.folder || mail.imapFolder, folder) && cachedUid === uidNumber) {
             replaced = true;
@@ -603,14 +627,14 @@ async function startServer() {
           }
           return mail;
         });
-        if (!replaced) cached.emails.push(parsedEmail);
-        cached.syncedAt = new Date().toISOString();
-        await writeMailCache(email, cached).catch((cacheError: any) => {
+        if (!replaced) cachePayload.emails.push(parsedEmail);
+        cachePayload.syncedAt = new Date().toISOString();
+        await writeMailCache(email, cachePayload).catch((cacheError: any) => {
           console.warn("Mail body cache write skipped", { email, message: cacheError?.message });
         });
       }
 
-      res.json({ email: parsedEmail });
+      res.json({ email: parsedEmail, cacheHit: false });
     } catch (error: any) {
       res.status(502).json({ error: error?.message || "Nachrichtentext konnte nicht vom IMAP-Server geladen werden." });
     } finally {

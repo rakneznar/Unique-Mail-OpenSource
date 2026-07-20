@@ -26,6 +26,19 @@ select,
   -webkit-app-region: no-drag;
 }
 
+[data-window-drag-region] {
+  -webkit-app-region: drag;
+}
+
+[data-window-drag-region] button,
+[data-window-drag-region] a,
+[data-window-drag-region] input,
+[data-window-drag-region] select,
+[data-window-drag-region] [role="button"],
+[data-window-no-drag] {
+  -webkit-app-region: no-drag;
+}
+
 input:not(:disabled):not([readonly]),
 textarea:not(:disabled):not([readonly]),
 [contenteditable="true"] {
