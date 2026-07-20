@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem }
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.38';
+const APP_VERSION = '0.4.39';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -3938,6 +3938,8 @@ Julia`,
               onToggleFlagCompleted={handleToggleFlagCompleted}
               signatureActive={signatureActive}
               signatureText={activeSignatureText}
+              defaultSignatureText={signatureText}
+              accountSignatures={accountSignatures}
               imageDownloadAllowList={imageDownloadAllowList}
               imageDownloadDenyList={imageDownloadDenyList}
               blockedSenderList={blockedSenderList}

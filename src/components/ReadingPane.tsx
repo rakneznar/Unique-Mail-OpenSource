@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Paperclip, Mail, Phone, MapPin, Building, Briefcase, Calendar, 
-  Clock, CheckSquare, Code, Check, Send, Copy, FileText, ShieldAlert
+  Clock, CheckSquare, Code, Check, Send, Copy, FileText, ShieldAlert, Signature
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, CalendarItemDraft } from '../types';
 
@@ -57,6 +57,8 @@ interface ReadingPaneProps {
   onCreateCalendarItemForDate?: (date: Date, draft?: CalendarItemDraft) => void;
   signatureActive?: boolean;
   signatureText?: string;
+  defaultSignatureText?: string;
+  accountSignatures?: Record<string, string>;
   imageDownloadAllowList?: string[];
   imageDownloadDenyList?: string[];
   blockedSenderList?: string[];
@@ -95,6 +97,8 @@ export default function ReadingPane({
   onCreateCalendarItemForDate,
   signatureActive = false,
   signatureText = '',
+  defaultSignatureText = '',
+  accountSignatures = {},
   imageDownloadAllowList = [],
   imageDownloadDenyList = [],
   blockedSenderList = [],
@@ -113,6 +117,7 @@ export default function ReadingPane({
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [subjectInput, setSubjectInput] = useState('');
   const [bodyInput, setBodyInput] = useState('');
+  const [composeSignatureChoice, setComposeSignatureChoice] = useState<'none' | 'account' | 'default'>('none');
   
   // Clipboard copy helper
   const [copiedText, setCopiedText] = useState<string | null>(null);
@@ -208,6 +213,34 @@ export default function ReadingPane({
   const accountOptions = Array.isArray(accounts) ? accounts : [];
   const defaultComposeAccountEmail = activeEmail?.accountEmail || activeAccountEmail || accountOptions[0]?.email || '';
   const activeComposeAccount = accountOptions.find(acc => String(acc.email).toLowerCase() === String(composeAccountEmail || defaultComposeAccountEmail).toLowerCase()) || accountOptions[0];
+  const selectedComposeAccountEmail = composeAccountEmail || defaultComposeAccountEmail;
+  const accountSignatureText = accountSignatures[selectedComposeAccountEmail] ?? signatureText;
+  const buildSignatureHtml = (value: string) => value
+    ? `<div data-unique-mail-signature="true" style="color:#222; font-family:sans-serif; font-size:12px;">${value.replace(/\n/g, '<br/>')}</div>`
+    : '';
+
+  const replaceComposeSignature = (value: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.querySelectorAll('[data-unique-mail-signature]').forEach(node => node.remove());
+    if (value) {
+      const holder = document.createElement('div');
+      holder.innerHTML = buildSignatureHtml(value);
+      const signatureNode = holder.firstElementChild;
+      if (signatureNode) {
+        const quote = editor.querySelector('[data-unique-mail-quote]');
+        if (quote) quote.before(signatureNode, document.createElement('br'), document.createElement('br'));
+        else editor.append(document.createElement('br'), document.createElement('br'), signatureNode);
+      }
+    }
+    setBodyInput(editor.innerHTML);
+    editor.focus();
+  };
+
+  const applyComposeSignatureChoice = (choice: 'none' | 'account' | 'default') => {
+    setComposeSignatureChoice(choice);
+    replaceComposeSignature(choice === 'account' ? accountSignatureText : choice === 'default' ? defaultSignatureText : '');
+  };
 
   const normalizeSenderAddress = (value?: string) => (value || '').trim().toLowerCase();
   const activeSenderKey = normalizeSenderAddress(activeEmail?.senderEmail);
@@ -610,9 +643,8 @@ a{color:#0078d4;cursor:pointer}
     if (isWritingEmail) {
       setComposeAttachments([]);
       setStoredAttachmentPayloads([]);
-      const signatureHtml = signatureActive && signatureText 
-        ? `<br/><br/><div style="color:#222; font-family:sans-serif; font-size:12px;">${signatureText.replace(/\n/g, '<br/>')}</div>` 
-        : '';
+      const signatureHtml = signatureActive && signatureText ? buildSignatureHtml(signatureText) : '';
+      setComposeSignatureChoice(signatureHtml ? 'account' : 'none');
 
       if (activeEmail && (composeMode === 'draft' || composeMode === 'outbox')) {
         setToInput(activeEmail.recipientEmail || '');
@@ -631,7 +663,7 @@ a{color:#0078d4;cursor:pointer}
         setBccInput('');
         setShowCcBcc(false);
         setSubjectInput(activeEmail.subject.startsWith('FW:') ? activeEmail.subject : `FW: ${activeEmail.subject}`);
-        const forwardTemplate = `<br/><br/>${signatureHtml}<br/><br/><div style="border-top:1px solid #e0e0e0; padding-top:10px; margin-top:20px; color:#555555; font-size:11px; font-family:sans-serif;"><b>Weitergeleitete Nachricht:</b><br/><b>Von:</b> ${activeEmail.sender} &lt;${activeEmail.senderEmail}&gt;<br/><b>Datum:</b> ${new Date(activeEmail.date).toLocaleString('de-DE')}<br/><b>Betreff:</b> ${activeEmail.subject}<br/><br/>${activeEmail.body.replace(/\n/g, '<br/>')}</div>`;
+        const forwardTemplate = `<br/><br/>${signatureHtml}<br/><br/><div data-unique-mail-quote="true" style="border-top:1px solid #e0e0e0; padding-top:10px; margin-top:20px; color:#555555; font-size:11px; font-family:sans-serif;"><b>Weitergeleitete Nachricht:</b><br/><b>Von:</b> ${activeEmail.sender} &lt;${activeEmail.senderEmail}&gt;<br/><b>Datum:</b> ${new Date(activeEmail.date).toLocaleString('de-DE')}<br/><b>Betreff:</b> ${activeEmail.subject}<br/><br/>${activeEmail.body.replace(/\n/g, '<br/>')}</div>`;
         setBodyInput(forwardTemplate);
         if (editorRef.current) {
           editorRef.current.innerHTML = forwardTemplate;
@@ -650,7 +682,7 @@ a{color:#0078d4;cursor:pointer}
         setBccInput('');
         setShowCcBcc(replyAllCcRecipients.length > 0);
         setSubjectInput(activeEmail.subject.startsWith('RE:') ? activeEmail.subject : `RE: ${activeEmail.subject}`);
-        const replyTemplate = `<br/><br/>${signatureHtml}<br/><br/><div style="border-top:1px solid #e0e0e0; padding-top:10px; margin-top:20px; color:#555555; font-size:11px; font-family:sans-serif;"><b>Ursprüngliche Nachricht:</b><br/><b>Von:</b> ${activeEmail.sender} &lt;${activeEmail.senderEmail}&gt;<br/><b>Datum:</b> ${new Date(activeEmail.date).toLocaleString('de-DE')}<br/><b>Betreff:</b> ${activeEmail.subject}<br/><br/>${activeEmail.body.replace(/\n/g, '<br/>')}</div>`;
+        const replyTemplate = `<br/><br/>${signatureHtml}<br/><br/><div data-unique-mail-quote="true" style="border-top:1px solid #e0e0e0; padding-top:10px; margin-top:20px; color:#555555; font-size:11px; font-family:sans-serif;"><b>Ursprüngliche Nachricht:</b><br/><b>Von:</b> ${activeEmail.sender} &lt;${activeEmail.senderEmail}&gt;<br/><b>Datum:</b> ${new Date(activeEmail.date).toLocaleString('de-DE')}<br/><b>Betreff:</b> ${activeEmail.subject}<br/><br/>${activeEmail.body.replace(/\n/g, '<br/>')}</div>`;
         setBodyInput(replyTemplate);
         if (editorRef.current) {
           editorRef.current.innerHTML = replyTemplate;
@@ -687,7 +719,7 @@ a{color:#0078d4;cursor:pointer}
   // --- 1. NEW EMAIL WRITING PANEL ---
   if (isWritingEmail && currentPage === 'mail') {
     return (
-      <div id="new-email-writer" className="flex-1 bg-white dark:bg-[#0f172a] flex flex-col h-full font-sans border-t md:border-t-0 select-none pb-4 overflow-y-auto">
+      <div id="new-email-writer" className="flex-1 min-h-0 bg-white dark:bg-[#0f172a] flex flex-col h-full font-sans border-t md:border-t-0 select-none overflow-hidden">
         {/* Editor Ribbon Quick Action Menu */}
         <div className="bg-slate-50 dark:bg-[#0b0f19] border-b border-slate-200 dark:border-[#1e293b] px-5 py-3 flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 w-full shrink-0">
           <span className="tracking-wide text-[10.5px] uppercase">E-Mail verfassen (Classic Rich-Text)</span>
@@ -699,6 +731,7 @@ a{color:#0078d4;cursor:pointer}
           </button>
         </div>
 
+        <div id="compose-scroll-region" className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
         {/* Input fields */}
         <div className="p-5 space-y-4 border-b border-slate-200 dark:border-[#1e293b] bg-slate-50/35 dark:bg-[#0f172a]/50 shrink-0">
           {accountOptions.length > 1 && (
@@ -706,7 +739,15 @@ a{color:#0078d4;cursor:pointer}
               <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">Von:</span>
               <select
                 value={composeAccountEmail || defaultComposeAccountEmail}
-                onChange={(event) => setComposeAccountEmail(event.target.value)}
+                onChange={(event) => {
+                  const nextAccountEmail = event.target.value;
+                  setComposeAccountEmail(nextAccountEmail);
+                  const nextSignature = accountSignatures[nextAccountEmail] ?? defaultSignatureText;
+                  if (signatureActive && nextSignature) {
+                    setComposeSignatureChoice('account');
+                    window.requestAnimationFrame(() => replaceComposeSignature(nextSignature));
+                  }
+                }}
                 className="px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-xl bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[11.5px] transition-all font-mono"
               >
                 {accountOptions.map(account => (
@@ -767,6 +808,24 @@ a{color:#0078d4;cursor:pointer}
               className="px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-xl bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[11.5px] transition-all"
               placeholder="Betreffzeile"
             />
+          </div>
+          <div className="grid grid-cols-[60px_1fr] items-center text-xs">
+            <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px] flex items-center gap-1" title="Signatur auswaehlen">
+              <Signature className="w-3.5 h-3.5" />
+              Signatur:
+            </span>
+            <select
+              id="compose-signature-select"
+              value={composeSignatureChoice}
+              onChange={(event) => applyComposeSignatureChoice(event.target.value as 'none' | 'account' | 'default')}
+              className="px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-lg bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[11.5px]"
+            >
+              <option value="none">Keine Signatur</option>
+              <option value="account" disabled={!accountSignatureText}>
+                Kontosignatur - {activeComposeAccount?.displayName || activeComposeAccount?.senderName || selectedComposeAccountEmail || 'aktuelles Konto'}
+              </option>
+              <option value="default" disabled={!defaultSignatureText}>Standard-Signatur</option>
+            </select>
           </div>
         </div>
 
@@ -1009,8 +1068,10 @@ a{color:#0078d4;cursor:pointer}
               </div>
             </div>
           )}
-          
-          <div className="flex items-center justify-between mt-4 shrink-0">
+        </div>
+        </div>
+
+          <div id="compose-action-bar" className="flex items-center justify-between gap-3 shrink-0 border-t border-slate-200 dark:border-[#1e293b] bg-slate-50 dark:bg-[#0b0f19] px-5 py-3 shadow-[0_-2px_8px_rgba(15,23,42,0.06)]">
             <div className="text-[10px] text-slate-400 font-mono font-semibold">
               OUTBOX-QUEUE: Bei Verbindungsstörungen automatisch gepuffert
             </div>
@@ -1089,7 +1150,6 @@ a{color:#0078d4;cursor:pointer}
               </button>
             </div>
           </div>
-        </div>
       </div>
     );
   }

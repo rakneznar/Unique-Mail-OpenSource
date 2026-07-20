@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Inbox, Send, Trash2, Archive, Folder, ChevronDown, ChevronRight, Star, 
-  Search, ShieldAlert, FileText, Settings, AppWindow, Database, RefreshCw, X
+  Search, ShieldAlert, FileText, Settings, AppWindow, Database, RefreshCw, X, GripVertical
 } from 'lucide-react';
 import { Email } from '../types';
 
@@ -79,6 +79,16 @@ export default function FolderTree({
     destinationFolder: string;
     destinationLabel: string;
   };
+  type PointerFolderDrag = {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+    accountEmail: string;
+    folderId: string;
+    label: string;
+    delimiter: string;
+  };
 
   const normalizeFavoriteFolders = (value: unknown): FavoriteFolderEntry[] => {
     if (!Array.isArray(value)) return [];
@@ -107,9 +117,12 @@ export default function FolderTree({
   const [collapsedAccounts, setCollapsedAccounts] = useState<Record<string, boolean>>({});
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [draggedFolderKey, setDraggedFolderKey] = useState<string | null>(null);
+  const [folderDropTargetKey, setFolderDropTargetKey] = useState<string | null>(null);
   const [pendingFolderDrop, setPendingFolderDrop] = useState<PendingFolderDrop | null>(null);
   const [folderMoveError, setFolderMoveError] = useState('');
   const [isMovingFolder, setIsMovingFolder] = useState(false);
+  const pointerFolderDragRef = useRef<PointerFolderDrag | null>(null);
+  const suppressFolderClickRef = useRef(false);
   const [favoriteFolderEntries, setFavoriteFolderEntries] = useState<FavoriteFolderEntry[]>(() => {
     try {
       const saved = localStorage.getItem('uniquemail_folder_favorites');
@@ -351,16 +364,18 @@ export default function FolderTree({
   };
   const folderNodeKey = (accountEmail: string, folderId: string) => accountEmail + '::' + normalizeFolderKey(folderId);
 
-  const hasFolderChildren = (folders: Array<{ id: string }>, folderId: string) => {
-    const base = normalizeFolderKey(folderId);
-    return folders.some(folder => normalizeFolderKey(folder.id).startsWith(base + '/'));
+  const hasFolderChildren = (folders: Array<{ id: string }>, folder: { id: string; delimiter?: string }) => {
+    const delimiter = folder.delimiter || '/';
+    const base = folder.id.toLowerCase();
+    return folders.some(candidate => candidate.id.toLowerCase().startsWith(base + delimiter.toLowerCase()));
   };
 
-  const isHiddenByCollapsedParent = (accountEmail: string, folders: Array<{ id: string }>, folderId: string) => {
-    const current = normalizeFolderKey(folderId);
+  const isHiddenByCollapsedParent = (accountEmail: string, folders: Array<{ id: string; delimiter?: string }>, folder: { id: string; delimiter?: string }) => {
+    const current = folder.id.toLowerCase();
     return folders.some(folder => {
-      const parent = normalizeFolderKey(folder.id);
-      if (parent === current || !current.startsWith(parent + '/')) return false;
+      const parent = folder.id.toLowerCase();
+      const delimiter = folder.delimiter || '/';
+      if (parent === current || !current.startsWith(parent + delimiter.toLowerCase())) return false;
       return !!collapsedFolders[folderNodeKey(accountEmail, folder.id)];
     });
   };
@@ -376,25 +391,106 @@ export default function FolderTree({
     return folder.isSelectable !== false && !folder.specialUse && !protectedFolderPattern.test(leaf.trim());
   };
 
-  const handleFolderDragStart = (
-    event: React.DragEvent,
+  const openFolderDropChoice = (
+    source: { accountEmail: string; folderId: string; label: string; delimiter: string },
+    destination: { accountEmail: string; folderId: string; label: string }
+  ) => {
+    if (source.accountEmail.toLowerCase() !== destination.accountEmail.toLowerCase()) {
+      window.alert('Ordner können nur innerhalb desselben E-Mail-Kontos verschoben werden.');
+      return;
+    }
+    const sourceKey = source.folderId.toLowerCase();
+    const destinationKey = destination.folderId.toLowerCase();
+    const delimiter = source.delimiter || '/';
+    if (sourceKey === destinationKey || destinationKey.startsWith(sourceKey + delimiter.toLowerCase())) {
+      window.alert('Ein Ordner kann nicht in sich selbst oder einen eigenen Unterordner verschoben werden.');
+      return;
+    }
+    setFolderMoveError('');
+    setPendingFolderDrop({
+      accountEmail: source.accountEmail,
+      sourceFolder: source.folderId,
+      sourceLabel: source.label,
+      destinationFolder: destination.folderId,
+      destinationLabel: destination.label
+    });
+  };
+
+  const pointerDropTargetAt = (clientX: number, clientY: number) => (
+    document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-folder-path]') || null
+  );
+
+  const resetPointerFolderDrag = () => {
+    pointerFolderDragRef.current = null;
+    setDraggedFolderKey(null);
+    setFolderDropTargetKey(null);
+  };
+
+  const handleFolderPointerDown = (
+    event: React.PointerEvent<HTMLButtonElement>,
     accountEmail: string,
     folder: { id: string; label: string; delimiter?: string; specialUse?: string | null; isSelectable?: boolean }
   ) => {
-    if (!canMoveFolder(folder)) {
-      event.preventDefault();
-      return;
-    }
-    const payload = JSON.stringify({
+    if (event.button !== 0 || !canMoveFolder(folder) || (event.target as HTMLElement).closest('[data-folder-control]')) return;
+    pointerFolderDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
       accountEmail,
       folderId: folder.id,
       label: folder.label,
       delimiter: folder.delimiter || '/'
-    });
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('application/x-unique-mail-folder', payload);
-    event.dataTransfer.setData('text/plain', `unique-mail-folder:${payload}`);
-    setDraggedFolderKey(folderNodeKey(accountEmail, folder.id));
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleFolderPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = pointerFolderDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) >= 6) {
+      drag.active = true;
+      suppressFolderClickRef.current = true;
+      setDraggedFolderKey(folderNodeKey(drag.accountEmail, drag.folderId));
+    }
+    if (!drag.active) return;
+    event.preventDefault();
+    const target = pointerDropTargetAt(event.clientX, event.clientY);
+    const targetAccount = target?.dataset.folderAccount || '';
+    const targetPath = target?.dataset.folderPath || '';
+    const invalidTreeTarget = !targetPath
+      || targetAccount.toLowerCase() !== drag.accountEmail.toLowerCase()
+      || targetPath.toLowerCase() === drag.folderId.toLowerCase()
+      || targetPath.toLowerCase().startsWith(drag.folderId.toLowerCase() + drag.delimiter.toLowerCase());
+    setFolderDropTargetKey(invalidTreeTarget ? null : folderNodeKey(targetAccount, targetPath));
+  };
+
+  const handleFolderPointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = pointerFolderDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (drag.active) {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = pointerDropTargetAt(event.clientX, event.clientY);
+      const targetAccount = target?.dataset.folderAccount || '';
+      const targetPath = target?.dataset.folderPath || '';
+      const targetLabel = target?.dataset.folderLabel || targetPath;
+      if (targetAccount && targetPath) {
+        openFolderDropChoice(
+          { accountEmail: drag.accountEmail, folderId: drag.folderId, label: drag.label, delimiter: drag.delimiter },
+          { accountEmail: targetAccount, folderId: targetPath, label: targetLabel }
+        );
+      }
+      window.setTimeout(() => { suppressFolderClickRef.current = false; }, 0);
+    }
+    resetPointerFolderDrag();
+  };
+
+  const handleFolderPointerCancel = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    suppressFolderClickRef.current = false;
+    resetPointerFolderDrag();
   };
 
   const handleFolderDrop = (
@@ -618,25 +714,38 @@ export default function FolderTree({
                     const FolderIcon = folder.icon;
                     const isSelected = selectedFolder === folder.id && activeAccountEmail.toLowerCase() === account.email.toLowerCase();
                     const isFavorite = favoriteFolderEntries.some(item => item.accountEmail === account.email && item.id === folder.id);
-                    const hasChildren = hasFolderChildren(folders, folder.id);
+                    const hasChildren = hasFolderChildren(folders, folder);
                     const folderCollapsed = !!collapsedFolders[folderNodeKey(account.email, folder.id)];
-                    if (isHiddenByCollapsedParent(account.email, folders, folder.id)) return null;
+                    if (isHiddenByCollapsedParent(account.email, folders, folder)) return null;
                     return (
                       <button
                         id={`account-folder-${account.email}-${folder.id}`}
                         data-folder-path={folder.id}
                         data-folder-account={account.email}
+                        data-folder-label={folder.label}
+                        data-folder-delimiter={folder.delimiter || '/'}
                         data-folder-movable={canMoveFolder(folder) ? 'true' : 'false'}
                         key={`${account.email}-${folder.id}`}
-                        onClick={() => folder.isSelectable !== false && handleFolderClick(account.email, folder.id)}
+                        onClick={(event) => {
+                          if (suppressFolderClickRef.current) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            return;
+                          }
+                          if (folder.isSelectable !== false) handleFolderClick(account.email, folder.id);
+                        }}
                         onDragOver={(e) => { if (folder.isSelectable !== false) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
                         onDrop={(e) => handleFolderDrop(e, account.email, folder)}
-                        draggable={canMoveFolder(folder)}
-                        onDragStart={(e) => handleFolderDragStart(e, account.email, folder)}
-                        onDragEnd={() => setDraggedFolderKey(null)}
-                        className={`w-full text-left flex items-center justify-between px-3.5 py-1.5 text-xs rounded-lg transition-colors duration-75 cursor-pointer ${
+                        draggable={false}
+                        onPointerDown={(event) => handleFolderPointerDown(event, account.email, folder)}
+                        onPointerMove={handleFolderPointerMove}
+                        onPointerUp={handleFolderPointerUp}
+                        onPointerCancel={handleFolderPointerCancel}
+                        className={`w-full text-left flex items-center justify-between px-3.5 py-1.5 text-xs rounded-lg transition-colors duration-75 ${canMoveFolder(folder) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
                           draggedFolderKey === folderNodeKey(account.email, folder.id)
                             ? 'opacity-45 border border-dashed border-[#0078d4] '
+                            : folderDropTargetKey === folderNodeKey(account.email, folder.id)
+                              ? 'bg-[#0078d4]/15 text-[#005a9e] ring-2 ring-[#0078d4]/60 ring-inset '
                             : ''
                         }${
                           isSelected
@@ -648,8 +757,12 @@ export default function FolderTree({
                         style={{ paddingLeft: `${14 + (folder.depth || 0) * 12}px` }}
                       >
                         <div className="flex items-center space-x-2.5 truncate">
+                          {canMoveFolder(folder) && (
+                            <GripVertical className="w-3 h-3 -ml-2 shrink-0 text-slate-300 cursor-grab active:cursor-grabbing" aria-label="Ordner ziehen" />
+                          )}
                           {hasChildren ? (
                             <span
+                              data-folder-control
                               role="button"
                               tabIndex={0}
                               onClick={(e) => {
@@ -674,6 +787,7 @@ export default function FolderTree({
                             </span>
                           )}
                           <span
+                            data-folder-control
                             role="button"
                             tabIndex={0}
                             onClick={(e) => {
