@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Paperclip, Mail, Phone, MapPin, Building, Briefcase, Calendar, 
-  Clock, CheckSquare, Code, Check, Send, Copy, FileText, ShieldAlert, Signature
+  Clock, CheckSquare, Code, Check, Send, Copy, FileText, FileSpreadsheet, FileArchive, FileImage, ShieldAlert, Signature
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, CalendarItemDraft } from '../types';
 
@@ -544,6 +544,7 @@ a{color:#0078d4;cursor:pointer}
   const [storedAttachmentPayloads, setStoredAttachmentPayloads] = React.useState<ComposeAttachmentPayload[]>([]);
   const [previewAttachment, setPreviewAttachment] = React.useState<{ name: string; type: string; size?: number; url: string } | null>(null);
   const [attachmentContextMenu, setAttachmentContextMenu] = React.useState<{ x: number; y: number; attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string } } | null>(null);
+  const [preparedAttachmentDrags, setPreparedAttachmentDrags] = React.useState<Record<string, string>>({});
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const autoSaveGenerationRef = React.useRef(0);
   const composeInitializedRef = React.useRef(false);
@@ -588,16 +589,56 @@ a{color:#0078d4;cursor:pointer}
     return contentType || 'application/octet-stream';
   };
 
+  const attachmentDragKey = (attachment: { filename: string; size?: number; contentBase64?: string }) =>
+    `${attachment.filename}:${attachment.size || 0}:${attachment.contentBase64?.length || 0}`;
+
+  const prepareAttachmentDragOut = async (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
+    if (!attachment.contentBase64) return;
+    const key = attachmentDragKey(attachment);
+    if (preparedAttachmentDrags[key]) return;
+    const nativeApi = (window as any).uniqueMailNative;
+    const result = await nativeApi?.prepareAttachmentDrag?.({ attachment });
+    if (result?.ok && result.token) {
+      setPreparedAttachmentDrags(previous => ({ ...previous, [key]: result.token }));
+    }
+  };
+
   const startAttachmentDragOut = (event: React.DragEvent, attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
-    if (!attachment.contentBase64) {
+    const token = preparedAttachmentDrags[attachmentDragKey(attachment)];
+    if (!attachment.contentBase64 || !token) {
       event.preventDefault();
+      void prepareAttachmentDragOut(attachment);
       return;
     }
     event.dataTransfer.effectAllowed = 'copy';
     event.dataTransfer.setData('text/plain', attachment.filename);
     const nativeApi = (window as any).uniqueMailNative;
-    nativeApi?.startAttachmentDrag?.({ attachment });
+    nativeApi?.startAttachmentDrag?.({ token });
   };
+
+  const renderAttachmentTypeIcon = (filename: string, contentType?: string) => {
+    const name = filename.toLowerCase();
+    const type = (contentType || '').toLowerCase();
+    if (name.endsWith('.pdf') || type.includes('pdf')) return <span className="inline-flex h-5 min-w-7 items-center justify-center rounded bg-red-600 px-1 text-[8px] font-black text-white">PDF</span>;
+    if (/\.(doc|docx|rtf)$/.test(name) || type.includes('word')) return <span className="inline-flex h-5 min-w-7 items-center justify-center rounded bg-blue-600 text-white"><FileText className="h-3.5 w-3.5" /></span>;
+    if (/\.(xls|xlsx|csv)$/.test(name) || type.includes('excel') || type.includes('spreadsheet')) return <span className="inline-flex h-5 min-w-7 items-center justify-center rounded bg-emerald-600 text-white"><FileSpreadsheet className="h-3.5 w-3.5" /></span>;
+    if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(name) || type.startsWith('image/')) return <span className="inline-flex h-5 min-w-7 items-center justify-center rounded bg-violet-600 text-white"><FileImage className="h-3.5 w-3.5" /></span>;
+    if (/\.(zip|rar|7z|tar|gz)$/.test(name) || type.includes('zip') || type.includes('compressed')) return <span className="inline-flex h-5 min-w-7 items-center justify-center rounded bg-orange-600 text-white"><FileArchive className="h-3.5 w-3.5" /></span>;
+    return <span className="inline-flex h-5 min-w-7 items-center justify-center rounded bg-slate-500 text-white"><FileText className="h-3.5 w-3.5" /></span>;
+  };
+
+  React.useEffect(() => {
+    setPreparedAttachmentDrags({});
+    let cancelled = false;
+    const prepareAll = async () => {
+      for (const attachment of activeEmail?.attachments || []) {
+        if (cancelled) return;
+        await prepareAttachmentDragOut(attachment);
+      }
+    };
+    void prepareAll();
+    return () => { cancelled = true; };
+  }, [activeEmail?.id]);
 
   const saveAttachmentToDisk = async (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
     if (!attachment.contentBase64) {
@@ -1451,12 +1492,15 @@ a{color:#0078d4;cursor:pointer}
                   type="button"
                   onClick={() => openPayloadPreview(attachment)}
                   draggable={!!attachment.contentBase64}
+                  onMouseEnter={() => void prepareAttachmentDragOut(attachment)}
+                  onFocus={() => void prepareAttachmentDragOut(attachment)}
                   onDragStart={(event) => startAttachmentDragOut(event, attachment)}
                   onContextMenu={(event) => { event.preventDefault(); setAttachmentContextMenu({ x: event.clientX, y: event.clientY, attachment }); }}
-                  className="bg-white border border-slate-200 hover:bg-slate-55 px-3 py-1 rounded-full text-[10.5px] cursor-pointer font-bold flex items-center text-[#0078d4] transition-all hover:shadow-xs max-w-[260px] truncate"
-                  title={attachment.contentBase64 ? 'Vorschau öffnen' : 'Anlage nachladen, dann Vorschau öffnen'}
+                  className="bg-white border border-slate-200 hover:bg-slate-55 px-2.5 py-1 rounded-md text-[10.5px] cursor-pointer font-bold flex items-center gap-1.5 text-[#0078d4] transition-all hover:shadow-xs max-w-[300px]"
+                  title={attachment.contentBase64 ? (preparedAttachmentDrags[attachmentDragKey(attachment)] ? 'Klicken für Vorschau oder in Explorer/Desktop/Uploadfeld ziehen' : 'Drag-and-drop wird vorbereitet...') : 'Anlage nachladen, dann Vorschau öffnen'}
                 >
-                  {attachment.filename}{attachment.size ? ` (${Math.max(1, Math.round(attachment.size / 1024))} KB)` : ''}
+                  {renderAttachmentTypeIcon(attachment.filename, attachment.contentType)}
+                  <span className="truncate">{attachment.filename}{attachment.size ? ` (${Math.max(1, Math.round(attachment.size / 1024))} KB)` : ''}</span>
                 </button>
               )) : (
                 <span className="bg-white border border-slate-200 px-3 py-1 rounded-full text-[10.5px] font-bold text-slate-500">

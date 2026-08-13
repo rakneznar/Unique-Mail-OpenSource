@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell, safeStorage } = require('electron');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -13,6 +13,7 @@ let mainWindow = null;
 const approvedWindowCloses = new WeakSet();
 let uniqueMailDataPaths = null;
 let lastKnownUpdate = null;
+const preparedAttachmentDrags = new Map();
 
 app.setName('Unique Mail');
 
@@ -201,6 +202,27 @@ function dragOutDirectory() {
   const target = path.join(uniqueMailDataPaths?.cacheDir || app.getPath('temp'), 'DragOut');
   fs.mkdirSync(target, { recursive: true });
   return target;
+}
+
+async function prepareAttachmentForDrag(attachment) {
+  if (!attachment?.contentBase64) throw new Error('Anlage enthaelt keine lokal geladenen Daten.');
+  const base64 = String(attachment.contentBase64);
+  const token = crypto.createHash('sha256')
+    .update(`${sanitizeDownloadFilename(attachment.filename)}\0${base64.length}\0${base64.slice(0, 2048)}`)
+    .digest('hex');
+  const directory = path.join(dragOutDirectory(), token.slice(0, 16));
+  await fs.promises.mkdir(directory, { recursive: true });
+  const filePath = path.join(directory, sanitizeDownloadFilename(attachment.filename));
+  if (!fs.existsSync(filePath)) {
+    const temporaryPath = `${filePath}.${process.pid}.tmp`;
+    await fs.promises.writeFile(temporaryPath, Buffer.from(base64, 'base64'));
+    await fs.promises.rename(temporaryPath, filePath).catch(async error => {
+      await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
+      if (!fs.existsSync(filePath)) throw error;
+    });
+  }
+  preparedAttachmentDrags.set(token, filePath);
+  return { token, filePath, filename: path.basename(filePath) };
 }
 
 function resolveAppIconPath() {
@@ -965,7 +987,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.42 <span class="unique-version-current">aktuell</span></h3><ul><li>Betreffzeilen im Lesebereich koennen jetzt mit der Maus markiert und in die Zwischenablage kopiert werden.</li><li>Die Bild-Aktionsleiste erscheint nur noch beim Ueberfahren eines Bildes im Mailkoerper und verschwindet beim Verlassen wieder.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.43 <span class="unique-version-current">aktuell</span></h3><ul><li>Anhaenge werden vor dem Ziehen sicher in einen lokalen Drag-Cache geschrieben; groessere PDF-Dateien bringen die App dadurch nicht mehr zum Absturz.</li><li>Anhaenge koennen per Drag-and-drop in Explorer, Desktop und kompatible Browser-Uploadfelder kopiert werden.</li><li>PDF-, Word-, Excel-, Bild-, Archiv- und sonstige Anhaenge erhalten klar erkennbare Dateityp-Symbole.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.42</h3><ul><li>Betreffzeilen im Lesebereich koennen jetzt mit der Maus markiert und in die Zwischenablage kopiert werden.</li><li>Die Bild-Aktionsleiste erscheint nur noch beim Ueberfahren eines Bildes im Mailkoerper und verschwindet beim Verlassen wieder.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.41</h3><ul><li>Manueller, automatischer und aktionsbezogener Sync aktualisieren jetzt alle verbundenen Konten und darin saemtliche IMAP-Ordner.</li><li>Unter Einstellungen kann fuer jedes E-Mail-Konto eine eigene Signatur ausgewaehlt, bearbeitet und dauerhaft gespeichert werden.</li><li>Neue Nachrichten werden bei jeder Aenderung lokal zwischengespeichert; beim Schliessen kann der Entwurf verworfen oder lokal und im IMAP-Entwurfsordner gespeichert werden.</li><li>Beim Beenden der App wird ein geoeffneter Entwurf automatisch gespeichert.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.40</h3><ul><li>Der Update-Aufraeumhelfer arbeitet vollstaendig unsichtbar; waehrend der Installation blinken keine CMD-Fenster mehr auf.</li><li>Das Windows-, Desktop- und Installer-Icon nutzt die verfuegbare Symbolflaeche deutlich besser aus.</li><li>Das Unique-Mail-Logo in der App-Kopfzeile wurde vergroessert und bleibt sauber in die vorhandene Titelzeile eingepasst.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.39</h3><ul><li>Beim Verfassen steht eine sichtbare Signaturauswahl fuer Konto-, Standard- oder keine Signatur bereit.</li><li>Die Aktionsleiste mit Abbrechen, Entwurf und Senden bleibt am unteren Fensterrand sichtbar, waehrend nur der eigentliche Compose-Inhalt scrollt.</li><li>Benutzerordner lassen sich in Electron zuverlaessig durch Gedrueckthalten und Ziehen verschieben; Zielordner werden markiert und die bestaetigte Struktur wird per IMAP synchronisiert.</li></ul></article>',
@@ -1098,7 +1121,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.42',
+        '0.4.43',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');
@@ -1366,12 +1389,28 @@ ipcMain.handle('native:choose-download-directory', async () => {
   return { canceled: false, directory: result.filePaths[0] };
 });
 
+ipcMain.handle('native:prepare-attachment-drag', async (_event, payload) => {
+  try {
+    const prepared = await prepareAttachmentForDrag(payload?.attachment);
+    return { ok: true, ...prepared };
+  } catch (error) {
+    log(`attachment drag preparation failed: ${error.message || String(error)}`);
+    return { ok: false, error: error.message || String(error) };
+  }
+});
+
 ipcMain.on('native:start-attachment-drag', (event, payload) => {
   try {
-    const filePath = writeAttachmentToDisk(payload?.attachment, dragOutDirectory());
-    event.sender.startDrag({ file: filePath, icon: resolveAppIconPath() });
+    const filePath = preparedAttachmentDrags.get(String(payload?.token || ''));
+    if (!filePath || !fs.existsSync(filePath)) throw new Error('Die Anlage ist fuer Drag-and-drop noch nicht vorbereitet.');
+    const iconPath = resolveAppIconPath();
+    const dragIcon = nativeImage.createFromPath(iconPath);
+    event.sender.startDrag({
+      file: filePath,
+      icon: dragIcon.isEmpty() ? iconPath : dragIcon.resize({ width: 32, height: 32 })
+    });
   } catch (error) {
-    log(`attachment drag failed: ${error.message || String(error)}`);
+    log(`attachment drag failed safely: ${error.message || String(error)}`);
   }
 });
 
