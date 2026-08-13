@@ -13,9 +13,10 @@ export default function AppLogo({ className = '', size = 32 }: AppLogoProps) {
       id="app-logo-img"
       src="/unique-mail-logo.png"
       alt="Unique Mail"
+      data-app-logo="true"
       width={size}
       height={size}
-      className={`select-none object-cover ${className}`}
+      className={`select-none object-contain ${className}`}
       style={{
         width: dimension,
         height: dimension,

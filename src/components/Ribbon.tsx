@@ -165,9 +165,9 @@ export default function Ribbon({
       {/* 1. Quick Access Toolbar & App Bar Title */}
       <div data-window-drag-region className="h-[48px] min-h-[48px] bg-slate-55 flex items-center justify-between pl-4 pr-44 border-b border-slate-200 text-xs shadow-xs">
         <div data-window-no-drag className="flex items-center space-x-3.5">
-          {/* Small Icon Brand with rounded-xl corners (Enlarged) */}
+          {/* Compact app brand; the artwork itself fills the available icon canvas. */}
           <div className="flex items-center space-x-2.5 cursor-pointer hover:opacity-90 transition-opacity">
-            <AppLogo size={36} className="rounded-xl shadow-md shrink-0" />
+            <AppLogo size={44} className="drop-shadow-md shrink-0" />
             <span className="font-extrabold text-[#0078d4] tracking-widest text-[14px] uppercase select-none">Unique Mail</span>
           </div>
           <span className="text-slate-300 font-light">|</span>

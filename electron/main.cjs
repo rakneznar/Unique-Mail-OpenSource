@@ -402,7 +402,7 @@ function cleanupStaleUpdateFiles() {
     if (!fs.existsSync(updatesDir)) return;
     const minimumAgeMs = 60 * 1000;
     for (const entry of fs.readdirSync(updatesDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !/\.(?:exe|ps1|cmd)$/i.test(entry.name)) continue;
+      if (!entry.isFile() || !/\.(?:exe|ps1|cmd|vbs|cjs)$/i.test(entry.name)) continue;
       const target = path.join(updatesDir, entry.name);
       try {
         if (Date.now() - fs.statSync(target).mtimeMs < minimumAgeMs) continue;
@@ -489,39 +489,18 @@ async function downloadAndOpenUniqueMailUpdate() {
   installerProcess.unref();
 
   const helperLogPath = path.join(uniqueMailDataPaths?.logsDir || app.getPath('userData'), 'update-helper.log');
-  const cleanupScriptPath = path.join(updatesDir, `cleanup-${Date.now()}.cmd`);
-  const cleanupScript = [
-    '@echo off',
-    'setlocal EnableExtensions DisableDelayedExpansion',
-    'set "installer=%~1"',
-    'set "installerPid=%~2"',
-    'set "log=%~3"',
-    '>>"%log%" echo [%date% %time%] Cleanup gestartet fuer PID %installerPid%',
-    ':waitForInstaller',
-    'tasklist /FI "PID eq %installerPid%" /NH 2^>NUL | findstr /C:"%installerPid%" ^>NUL',
-    'if not errorlevel 1 (',
-    '  timeout /t 2 /nobreak >NUL',
-    '  goto waitForInstaller',
-    ')',
-    'timeout /t 3 /nobreak >NUL',
-    'for /L %%A in (1,1,60) do (',
-    '  del /f /q "%installer%" 2>NUL',
-    '  if not exist "%installer%" goto installerRemoved',
-    '  timeout /t 1 /nobreak >NUL',
-    ')',
-    '>>"%log%" echo [%date% %time%] Installer konnte nicht entfernt werden: %installer%',
-    'goto cleanupFinished',
-    ':installerRemoved',
-    '>>"%log%" echo [%date% %time%] Installer entfernt: %installer%',
-    ':cleanupFinished',
-    'del /f /q "%~f0" 2>NUL',
-    'exit /b 0'
-  ].join('\r\n');
-  fs.writeFileSync(cleanupScriptPath, cleanupScript, 'ascii');
+  const cleanupScriptPath = path.join(updatesDir, `cleanup-${Date.now()}.cjs`);
+  fs.copyFileSync(path.join(__dirname, 'update-cleanup.cjs'), cleanupScriptPath);
   try {
-    const cleanupProcess = spawn('cmd.exe', [
-      '/d', '/c', 'call', cleanupScriptPath, targetPath, String(installerProcess.pid), helperLogPath
-    ], { detached: true, stdio: 'ignore', windowsHide: true });
+    const cleanupProcess = spawn(process.execPath, [
+      cleanupScriptPath, targetPath, String(installerProcess.pid), helperLogPath
+    ], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: false,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    });
     cleanupProcess.unref();
     log(`update cleanup helper launched: pid=${cleanupProcess.pid} script=${cleanupScriptPath}`);
   } catch (error) {
@@ -980,7 +959,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.39 <span class="unique-version-current">aktuell</span></h3><ul><li>Beim Verfassen steht eine sichtbare Signaturauswahl fuer Konto-, Standard- oder keine Signatur bereit.</li><li>Die Aktionsleiste mit Abbrechen, Entwurf und Senden bleibt am unteren Fensterrand sichtbar, waehrend nur der eigentliche Compose-Inhalt scrollt.</li><li>Benutzerordner lassen sich in Electron zuverlaessig durch Gedrueckthalten und Ziehen verschieben; Zielordner werden markiert und die bestaetigte Struktur wird per IMAP synchronisiert.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.40 <span class="unique-version-current">aktuell</span></h3><ul><li>Der Update-Aufraeumhelfer arbeitet vollstaendig unsichtbar; waehrend der Installation blinken keine CMD-Fenster mehr auf.</li><li>Das Windows-, Desktop- und Installer-Icon nutzt die verfuegbare Symbolflaeche deutlich besser aus.</li><li>Das Unique-Mail-Logo in der App-Kopfzeile wurde vergroessert und bleibt sauber in die vorhandene Titelzeile eingepasst.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.39</h3><ul><li>Beim Verfassen steht eine sichtbare Signaturauswahl fuer Konto-, Standard- oder keine Signatur bereit.</li><li>Die Aktionsleiste mit Abbrechen, Entwurf und Senden bleibt am unteren Fensterrand sichtbar, waehrend nur der eigentliche Compose-Inhalt scrollt.</li><li>Benutzerordner lassen sich in Electron zuverlaessig durch Gedrueckthalten und Ziehen verschieben; Zielordner werden markiert und die bestaetigte Struktur wird per IMAP synchronisiert.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.38</h3><ul><li>Die gesamte freie obere Titelzeile dient jetzt als klar nutzbare Ziehflaeche; Logo, Schnellaktionen und Fenstersteuerung bleiben normal anklickbar.</li><li>Vollstaendig gespeicherte Nachrichtentexte und Anhaenge werden direkt aus dem persistenten lokalen Cache geliefert, ohne vorherige IMAP-Verbindung.</li><li>Doppelte Body-Abrufe werden zusammengefuehrt; die ausgewaehlte Mail erhaelt Benutzerprioritaet und benachbarte Mails werden sparsam im Leerlauf vorgeladen.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.37</h3><ul><li>Lange HTML- und Textnachrichten besitzen wieder einen eigenen, zuverlaessigen Scrollbereich; Mausradbewegungen im isolierten Mail-Frame werden korrekt weitergereicht.</li><li>Benutzerdefinierte IMAP-Ordner koennen per Drag-and-drop auf einen anderen Ordner gezogen und als Unterordner eingeordnet werden.</li><li>Beim Ablegen kann alternativ der gesamte Inhalt samt Unterordnern in den Zielordner migriert werden; Systemordner und unzulaessige Kreisverschiebungen bleiben geschuetzt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.36</h3><ul><li>Unter Gemeinsamer Posteingang werden keine Kontoadressen mehr angezeigt; Bezeichnung und gelber Aktivitaetspunkt bleiben bewusst kompakt.</li><li>Der Termin-Editor wird nach einem Doppelklick als garantiert sichtbares, rechts angedocktes In-App-Panel geoeffnet.</li><li>Kalender-Doppelklick, sichtbarer Editor und dauerhaftes Speichern werden gemeinsam in der Desktop-Regression geprueft.</li></ul></article>',
@@ -1110,7 +1090,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.39',
+        '0.4.40',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');
