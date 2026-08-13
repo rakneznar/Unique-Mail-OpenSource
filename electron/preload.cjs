@@ -77,9 +77,20 @@ contextBridge.exposeInMainWorld('uniqueMailNative', {
   persistRendererStorage: () => persistLocalStorageSnapshot(),
   checkForUpdate: () => ipcRenderer.invoke('native:update-check'),
   downloadAndInstallUpdate: () => ipcRenderer.invoke('native:update-download-install'),
+  confirmAppClose: () => ipcRenderer.send('native:confirm-app-close'),
   onUpdateProgress: (callback) => {
     if (typeof callback !== 'function') return;
     ipcRenderer.on('native:update-progress', (_event, payload) => callback(payload));
+  }
+});
+
+ipcRenderer.on('native:before-app-close', () => {
+  try {
+    const event = new CustomEvent('unique-mail-before-app-close', { cancelable: true });
+    const handled = !window.dispatchEvent(event);
+    if (!handled) ipcRenderer.send('native:confirm-app-close');
+  } catch {
+    ipcRenderer.send('native:confirm-app-close');
   }
 });
 

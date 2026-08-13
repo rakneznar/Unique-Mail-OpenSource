@@ -47,7 +47,9 @@ interface ReadingPaneProps {
   setIsWritingEmail: (val: boolean) => void;
   composeMode: ComposeMode;
   onSendEmail: (message: ComposeMailPayload) => Promise<void> | void;
-  onSaveDraft: (message: ComposeMailPayload) => void;
+  onSaveDraft: (message: ComposeMailPayload) => Promise<void> | void;
+  onAutoSaveDraft?: (message: ComposeMailPayload) => void;
+  onDiscardDraft?: (id: string) => void;
   onRetryOutboxEmail?: (id: string) => Promise<void> | void;
   onEditStoredEmail?: (id: string, mode: 'draft' | 'outbox') => void;
   onAddContact?: (contact: Contact) => void;
@@ -88,6 +90,8 @@ export default function ReadingPane({
   composeMode,
   onSendEmail,
   onSaveDraft,
+  onAutoSaveDraft,
+  onDiscardDraft,
   onRetryOutboxEmail,
   onEditStoredEmail,
   onAddContact,
@@ -118,6 +122,8 @@ export default function ReadingPane({
   const [subjectInput, setSubjectInput] = useState('');
   const [bodyInput, setBodyInput] = useState('');
   const [composeSignatureChoice, setComposeSignatureChoice] = useState<'none' | 'account' | 'default'>('none');
+  const [composeDraftId, setComposeDraftId] = useState('');
+  const [showDraftClosePrompt, setShowDraftClosePrompt] = useState(false);
   
   // Clipboard copy helper
   const [copiedText, setCopiedText] = useState<string | null>(null);
@@ -512,6 +518,8 @@ a{color:#0078d4;cursor:pointer}
   const [previewAttachment, setPreviewAttachment] = React.useState<{ name: string; type: string; size?: number; url: string } | null>(null);
   const [attachmentContextMenu, setAttachmentContextMenu] = React.useState<{ x: number; y: number; attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string } } | null>(null);
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
+  const autoSaveGenerationRef = React.useRef(0);
+  const composeInitializedRef = React.useRef(false);
 
   React.useEffect(() => {
     if (!previewAttachment) return;
@@ -641,12 +649,14 @@ a{color:#0078d4;cursor:pointer}
   // Handle auto-population of replies, forwards, drafts and outbox messages.
   React.useEffect(() => {
     if (isWritingEmail) {
+      composeInitializedRef.current = false;
       setComposeAttachments([]);
       setStoredAttachmentPayloads([]);
       const signatureHtml = signatureActive && signatureText ? buildSignatureHtml(signatureText) : '';
       setComposeSignatureChoice(signatureHtml ? 'account' : 'none');
 
       if (activeEmail && (composeMode === 'draft' || composeMode === 'outbox')) {
+        setComposeDraftId(activeEmail.id);
         setToInput(activeEmail.recipientEmail || '');
         setCcInput(activeEmail.ccEmail || '');
         setBccInput(activeEmail.bccEmail || '');
@@ -658,6 +668,7 @@ a{color:#0078d4;cursor:pointer}
           editorRef.current.innerHTML = activeEmail.body || '';
         }
       } else if (activeEmail && composeMode === 'forward') {
+        setComposeDraftId(`draft-${Date.now()}`);
         setToInput('');
         setCcInput('');
         setBccInput('');
@@ -669,6 +680,7 @@ a{color:#0078d4;cursor:pointer}
           editorRef.current.innerHTML = forwardTemplate;
         }
       } else if (activeEmail && (composeMode === 'reply' || composeMode === 'replyAll')) {
+        setComposeDraftId(`draft-${Date.now()}`);
         const ownAddress = activeEmail.accountEmail || defaultComposeAccountEmail;
         const replyAllRecipients = uniqueAddressList([
           activeEmail.senderEmail || activeEmail.sender,
@@ -688,6 +700,7 @@ a{color:#0078d4;cursor:pointer}
           editorRef.current.innerHTML = replyTemplate;
         }
       } else {
+        setComposeDraftId(`draft-${Date.now()}`);
         setToInput('');
         setCcInput('');
         setBccInput('');
@@ -699,8 +712,79 @@ a{color:#0078d4;cursor:pointer}
           editorRef.current.innerHTML = initialComposeHtml;
         }
       }
+      window.requestAnimationFrame(() => { composeInitializedRef.current = true; });
     }
   }, [isWritingEmail, selectedEmailId, composeMode, signatureActive, signatureText, defaultComposeAccountEmail, accountOptions.length]);
+
+  const buildComposePayload = React.useCallback(async (): Promise<ComposeMailPayload> => {
+    const freshAttachments = await Promise.all(composeAttachments.map(fileToAttachmentPayload));
+    return {
+      to: toInput,
+      cc: ccInput,
+      bcc: bccInput,
+      subject: subjectInput,
+      body: editorRef.current ? editorRef.current.innerHTML : bodyInput,
+      attachments: [...storedAttachmentPayloads, ...freshAttachments],
+      accountEmail: composeAccountEmail || defaultComposeAccountEmail,
+      sourceId: composeDraftId || activeEmail?.id || `draft-${Date.now()}`,
+    };
+  }, [toInput, ccInput, bccInput, subjectInput, bodyInput, storedAttachmentPayloads, composeAttachments, composeAccountEmail, defaultComposeAccountEmail, composeDraftId, activeEmail?.id]);
+
+  React.useEffect(() => {
+    if (!isWritingEmail || !composeInitializedRef.current || !composeDraftId || !onAutoSaveDraft) return;
+    const generation = ++autoSaveGenerationRef.current;
+    void buildComposePayload().then(payload => {
+      if (generation !== autoSaveGenerationRef.current || !composeInitializedRef.current) return;
+      localStorage.setItem('uniquemail_active_compose_draft', JSON.stringify(payload));
+      (window as any).uniqueMailNative?.persistRendererStorage?.();
+      onAutoSaveDraft(payload);
+    }).catch(() => undefined);
+  }, [isWritingEmail, composeDraftId, toInput, ccInput, bccInput, subjectInput, bodyInput, storedAttachmentPayloads, composeAttachments, composeAccountEmail, composeSignatureChoice, buildComposePayload]);
+
+  React.useEffect(() => {
+    const handleAppClose = (event: Event) => {
+      if (!isWritingEmail) return;
+      event.preventDefault();
+      void buildComposePayload()
+        .then(payload => Promise.resolve(onSaveDraft(payload)))
+        .then(() => {
+          localStorage.removeItem('uniquemail_active_compose_draft');
+          (window as any).uniqueMailNative?.persistRendererStorage?.();
+        })
+        .catch(() => undefined)
+        .finally(() => (window as any).uniqueMailNative?.confirmAppClose?.());
+    };
+    window.addEventListener('unique-mail-before-app-close', handleAppClose);
+    return () => window.removeEventListener('unique-mail-before-app-close', handleAppClose);
+  }, [isWritingEmail, buildComposePayload, onSaveDraft]);
+
+  const requestCloseCompose = () => {
+    if (isSendingMessage) return;
+    setShowDraftClosePrompt(true);
+  };
+
+  const finishCompose = (discard = false) => {
+    if (discard && composeDraftId) onDiscardDraft?.(composeDraftId);
+    localStorage.removeItem('uniquemail_active_compose_draft');
+    setShowDraftClosePrompt(false);
+    setComposeAttachments([]);
+    setStoredAttachmentPayloads([]);
+    composeInitializedRef.current = false;
+    setIsWritingEmail(false);
+  };
+
+  const saveAndCloseCompose = async () => {
+    setIsSendingMessage(true);
+    try {
+      const payload = await buildComposePayload();
+      await Promise.resolve(onSaveDraft(payload));
+      finishCompose(false);
+    } catch (error: any) {
+      alert(`Entwurf konnte nicht gespeichert werden:\n\n${error?.message || error}`);
+    } finally {
+      setIsSendingMessage(false);
+    }
+  };
 
   // Command executor for document design mode (Rich Text capabilities)
   const applyStyle = (command: string, value: string = '') => {
@@ -724,7 +808,7 @@ a{color:#0078d4;cursor:pointer}
         <div className="bg-slate-50 dark:bg-[#0b0f19] border-b border-slate-200 dark:border-[#1e293b] px-5 py-3 flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 w-full shrink-0">
           <span className="tracking-wide text-[10.5px] uppercase">E-Mail verfassen (Classic Rich-Text)</span>
           <button 
-            onClick={() => setIsWritingEmail(false)}
+            onClick={requestCloseCompose}
             className="text-slate-400 hover:text-red-500 dark:text-slate-450 font-mono font-bold text-sm transition-colors cursor-pointer"
           >
             x
@@ -977,7 +1061,7 @@ a{color:#0078d4;cursor:pointer}
                 addComposeFiles(e.dataTransfer.files);
               }
             }}
-            onBlur={() => {
+            onInput={() => {
               if (editorRef.current) {
                 setBodyInput(editorRef.current.innerHTML);
               }
@@ -1077,7 +1161,7 @@ a{color:#0078d4;cursor:pointer}
             </div>
             <div className="flex space-x-2.5">
               <button 
-                onClick={() => setIsWritingEmail(false)}
+                onClick={requestCloseCompose}
                 disabled={isSendingMessage}
                 className="px-4.5 py-2 border border-slate-200 dark:border-[#334155] hover:bg-slate-50 dark:hover:bg-[#1e293b] rounded-lg text-xs transition-colors font-semibold text-slate-650 dark:text-slate-300 cursor-pointer disabled:opacity-60"
               >
@@ -1090,19 +1174,8 @@ a{color:#0078d4;cursor:pointer}
                   const finalHtml = editorRef.current ? editorRef.current.innerHTML : bodyInput;
                   setIsSendingMessage(true);
                   try {
-                    const freshAttachments = await Promise.all(composeAttachments.map(fileToAttachmentPayload));
-                    onSaveDraft({
-                      to: toInput,
-                      cc: ccInput,
-                      bcc: bccInput,
-                      subject: subjectInput,
-                      body: finalHtml,
-                      attachments: [...storedAttachmentPayloads, ...freshAttachments],
-                      accountEmail: composeAccountEmail || defaultComposeAccountEmail,
-                      sourceId: activeEmail && (composeMode === 'draft' || composeMode === 'outbox') ? activeEmail.id : undefined,
-                    });
-                    setComposeAttachments([]);
-                    setIsWritingEmail(false);
+                    await Promise.resolve(onSaveDraft(await buildComposePayload()));
+                    finishCompose(false);
                   } catch (error: any) {
                     alert(`Entwurf konnte nicht gespeichert werden:\n\n${error?.message || error}`);
                   } finally {
@@ -1136,7 +1209,7 @@ a{color:#0078d4;cursor:pointer}
                     });
                     setComposeAttachments([]);
                     setStoredAttachmentPayloads([]);
-                    setIsWritingEmail(false);
+                    finishCompose(false);
                   } catch (error: any) {
                     alert(`Senden fehlgeschlagen:\n\n${error?.message || error}`);
                   } finally {
@@ -1150,6 +1223,23 @@ a{color:#0078d4;cursor:pointer}
               </button>
             </div>
           </div>
+          {showDraftClosePrompt && createPortal(
+            <div className="fixed inset-0 z-[10050] bg-slate-950/45 backdrop-blur-[1px] flex items-center justify-center p-4">
+              <section role="dialog" aria-modal="true" aria-labelledby="draft-close-title" className="w-full max-w-[470px] bg-white dark:bg-[#111827] border border-slate-250 dark:border-slate-700 shadow-2xl rounded-lg overflow-hidden">
+                <header className="px-5 py-4 border-b border-slate-200 dark:border-slate-700">
+                  <h2 id="draft-close-title" className="text-sm font-extrabold text-slate-900 dark:text-white">Nachricht als Entwurf speichern?</h2>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Ihre Änderungen wurden bereits automatisch lokal zwischengespeichert.</p>
+                </header>
+                <div className="px-5 py-4 text-xs text-slate-650 dark:text-slate-300">Soll diese Nachricht im Entwürfe-Ordner des ausgewählten Kontos gespeichert werden?</div>
+                <footer className="px-5 py-3 bg-slate-50 dark:bg-[#0b1220] border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+                  <button type="button" onClick={() => setShowDraftClosePrompt(false)} className="px-3.5 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-xs font-bold">Abbrechen</button>
+                  <button type="button" onClick={() => finishCompose(true)} className="px-3.5 py-2 border border-red-300 text-red-700 dark:text-red-300 rounded-md text-xs font-bold">Nicht speichern</button>
+                  <button type="button" onClick={() => void saveAndCloseCompose()} disabled={isSendingMessage} className="px-4 py-2 bg-[#0078d4] text-white rounded-md text-xs font-bold disabled:opacity-60">Speichern</button>
+                </footer>
+              </section>
+            </div>,
+            document.body
+          )}
       </div>
     );
   }

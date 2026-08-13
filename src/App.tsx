@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem }
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.40';
+const APP_VERSION = '0.4.41';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -1359,7 +1359,7 @@ exit`;
       const response = await fetch('/api/ai/generate-signature', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentSignature: activeSignatureText, prompt: signatureAIPrompt }),
+        body: JSON.stringify({ currentSignature: signatureEditorText, prompt: signatureAIPrompt }),
       });
       if (!response.ok) {
         const errData = await response.json();
@@ -1368,9 +1368,8 @@ exit`;
       const data = await response.json();
       if (data.signature) {
         const nextSignature = data.signature.trim();
-        setSignatureText(nextSignature);
-        if (activeAccountEmail) {
-          setAccountSignatures(prev => ({ ...prev, [activeAccountEmail]: nextSignature }));
+        if (signatureEditorAccountEmail) {
+          setAccountSignatures(prev => ({ ...prev, [signatureEditorAccountEmail]: nextSignature }));
         }
         setSignatureActive(true); // Automatically ensure active if generated
       }
@@ -1553,12 +1552,19 @@ exit`;
     const saved = localStorage.getItem('outlook_active_account');
     return saved || '';
   });
+  const [signatureEditorAccountEmail, setSignatureEditorAccountEmail] = useState<string>('');
 
   useEffect(() => {
     if (!activeAccountEmail && accounts.length > 0) {
       setActiveAccountEmail(accounts[0].email);
     }
   }, [activeAccountEmail, accounts]);
+
+  useEffect(() => {
+    if (!signatureEditorAccountEmail || !accounts.some(account => account.email.toLowerCase() === signatureEditorAccountEmail.toLowerCase())) {
+      setSignatureEditorAccountEmail(activeAccountEmail || accounts[0]?.email || '');
+    }
+  }, [signatureEditorAccountEmail, activeAccountEmail, accounts]);
 
   // Derived state: scan emails for suggested contacts that do not exist in the permanent contacts database
   const suggestedContacts = useMemo<Contact[]>(() => {
@@ -1696,6 +1702,8 @@ exit`;
   const [isOffline, setIsOffline] = useState<boolean>(false);
   const [isWritingEmail, setIsWritingEmail] = useState<boolean>(false);
   const [composeMode, setComposeMode] = useState<ComposeMode>('new');
+  const restoredComposeDraftRef = useRef(false);
+  const draftOriginalsRef = useRef<Map<string, Email>>(new Map());
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterUnreadOnly, setFilterUnreadOnly] = useState<boolean>(false);
   const [selectedFolder, setSelectedFolder] = useState<string>('inbox');
@@ -1884,6 +1892,7 @@ exit`;
   // Discovered settings for active account
   const activeAccount = accounts.find(a => a.email.toLowerCase() === activeAccountEmail.toLowerCase()) || accounts[0];
   const activeSignatureText = activeAccountEmail ? (accountSignatures[activeAccountEmail] ?? signatureText) : signatureText;
+  const signatureEditorText = signatureEditorAccountEmail ? (accountSignatures[signatureEditorAccountEmail] ?? '') : '';
   const [discoveredSettings, setDiscoveredSettings] = useState<any>({
     imapServer: activeAccount?.imapServer || 'imap.local',
     imapPort: activeAccount?.imapPort || 993,
@@ -2025,33 +2034,36 @@ exit`;
     }
     if (isSyncing) return;
 
-    const active = accounts.find(acc => acc.email.toLowerCase() === activeAccountEmail.toLowerCase()) || accounts[0];
-    if (!active) {
+    if (accounts.length === 0) {
       alert("Bitte zuerst ein E-Mail-Konto hinzufügen.");
       return;
     }
 
-    const password = await getSessionPassword(active);
-    if (!password) return;
-
     setIsSyncing(true);
     setSyncProgress(10);
-    setSyncStatusText(`Verbinde mit ${active.imapServer}:${active.imapPort}...`);
+    setSyncStatusText(`Synchronisiere alle Ordner in ${accounts.length} Konto/Konten...`);
 
     try {
-      setSyncProgress(35);
-      setSyncStatusText("Ordnerstruktur vom Server laden...");
-      const syncResult = await syncInboxForAccount(active, password);
-      setSyncProgress(80);
-      if (syncResult.folders.length > 0) {
-        setAccounts(prev => prev.map(acc => acc.email.toLowerCase() === active.email.toLowerCase() ? { ...acc, serverFolders: syncResult.folders } : acc));
+      let syncedEmails = 0;
+      let syncedFolders = 0;
+      let syncedAccounts = 0;
+      for (let index = 0; index < accounts.length; index += 1) {
+        const account = accounts[index];
+        const password = await getSessionPassword(account);
+        if (!password) continue;
+        setSyncProgress(10 + Math.round((index / Math.max(1, accounts.length)) * 80));
+        setSyncStatusText(`${account.email}: alle Serverordner werden aktualisiert...`);
+        const syncResult = await syncInboxForAccount(account, password);
+        syncedAccounts += 1;
+        syncedEmails += syncResult.emails.length;
+        syncedFolders += syncResult.folders.length;
+        if (syncResult.folders.length > 0) {
+          setAccounts(prev => prev.map(acc => acc.email.toLowerCase() === account.email.toLowerCase() ? { ...acc, serverFolders: syncResult.folders } : acc));
+        }
+        setEmails(prev => mergeSyncedEmails(prev, account.email, syncResult.emails));
       }
-      const nextFolder = pickVisibleFolderAfterSync(syncResult.emails, syncResult.folders);
-      setEmails(prev => mergeSyncedEmails(prev, active.email, syncResult.emails));
-      setSelectedFolder(nextFolder);
-      setSelectedEmailId(pickVisibleEmailAfterSync(syncResult.emails, nextFolder));
       setSyncProgress(100);
-      setSyncStatusText(`${syncResult.emails.length} E-Mail(s) aus ${syncResult.folders.length} Serverordner(n) geladen.`);
+      setSyncStatusText(`Vollsync abgeschlossen: ${syncedEmails} E-Mail(s) aus ${syncedFolders} Serverordner(n) und ${syncedAccounts} Konto/Konten aktualisiert.`);
     } catch (error: any) {
       setSyncStatusText(`Synchronisation fehlgeschlagen: ${error.message || error}`);
       alert(`Synchronisation fehlgeschlagen:\n\n${error.message || error}`);
@@ -2154,15 +2166,16 @@ Julia`,
   };
 
   // Send email through the configured SMTP account and persist a local sent/outbox copy.
-  const handleSaveDraft = (message: ComposeMailPayload) => {
+  const createDraftMail = (message: ComposeMailPayload): { active: any; draftMail: Email } | null => {
     const requestedAccountEmail = message.accountEmail || activeAccountEmail;
     const active = accounts.find(acc => acc.email.toLowerCase() === requestedAccountEmail.toLowerCase()) || accounts[0];
     if (!active) {
       setSyncStatusText('Entwurf konnte nicht gespeichert werden: kein Konto vorhanden.');
-      return;
+      return null;
     }
 
     const draftId = message.sourceId || `draft-${Date.now()}`;
+    const existingDraft = emails.find(mail => mail.id === draftId);
     const draftMail: Email = {
       id: draftId,
       sender: getAccountDisplayName(active) || active.email,
@@ -2176,8 +2189,10 @@ Julia`,
       hasAttachment: message.attachments.length > 0,
       importance: 'normal',
       category: 'Entwurf',
-      folder: 'drafts',
-      imapFolder: 'drafts',
+      folder: existingDraft?.folder || 'drafts',
+      imapFolder: existingDraft?.imapFolder || 'drafts',
+      imapUid: existingDraft?.imapUid,
+      imapUidValidity: existingDraft?.imapUidValidity,
       accountEmail: active.email,
       recipientEmail: message.to,
       ccEmail: message.cc,
@@ -2187,14 +2202,103 @@ Julia`,
       sendStatus: 'queued'
     };
 
-    setEmails(prev => prev.some(mail => mail.id === draftId)
-      ? prev.map(mail => mail.id === draftId ? draftMail : mail)
-      : [draftMail, ...prev]
-    );
-    setSelectedEmailId(draftId);
-    setSyncStatusText('Entwurf lokal gespeichert.');
-    triggerPostActionSync('Entwurf gespeichert', [draftMail]);
+    return { active, draftMail };
   };
+
+  const handleAutoSaveDraft = (message: ComposeMailPayload) => {
+    const draft = createDraftMail(message);
+    if (!draft) return;
+    const existing = emails.find(mail => mail.id === draft.draftMail.id);
+    if (existing && !draftOriginalsRef.current.has(existing.id)) {
+      draftOriginalsRef.current.set(existing.id, { ...existing });
+    }
+    setEmails(prev => prev.some(mail => mail.id === draft.draftMail.id)
+      ? prev.map(mail => mail.id === draft.draftMail.id ? draft.draftMail : mail)
+      : [draft.draftMail, ...prev]
+    );
+    setSyncStatusText('Entwurf automatisch lokal gespeichert.');
+  };
+
+  const saveDraftToServer = async (active: any, draftMail: Email, message: ComposeMailPayload) => {
+    const password = await getStoredAccountPasswordNoPrompt(active);
+    if (!password) {
+      setSyncStatusText('Entwurf lokal gespeichert; IMAP-Speicherung wartet auf ein gespeichertes Kontopasswort.');
+      return;
+    }
+    const source = message.sourceId ? emails.find(mail => mail.id === message.sourceId) : undefined;
+    const draftsFolder = resolveServerFolderPath(active, 'drafts');
+    const response = await fetch('/api/mail/drafts/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: active.email,
+        password,
+        imapServer: active.imapServer,
+        imapPort: active.imapPort,
+        from: formatSenderAddress(active),
+        to: message.to,
+        cc: message.cc,
+        bcc: message.bcc,
+        subject: message.subject || '(Kein Betreff)',
+        html: message.body,
+        draftsFolder,
+        sourceFolder: (source?.imapUid || draftMail.imapUid) ? (source?.imapFolder || draftMail.imapFolder) : undefined,
+        sourceUid: source?.imapUid || draftMail.imapUid,
+        attachments: message.attachments,
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Entwurf konnte nicht auf dem IMAP-Server gespeichert werden.');
+    if (data.uid) {
+      setEmails(prev => prev.map(mail => mail.id === draftMail.id
+        ? { ...mail, imapUid: Number(data.uid), imapFolder: draftsFolder, folder: draftsFolder }
+        : mail));
+    }
+  };
+
+  const handleSaveDraft = async (message: ComposeMailPayload) => {
+    const draft = createDraftMail(message);
+    if (!draft) return;
+    setEmails(prev => prev.some(mail => mail.id === draft.draftMail.id)
+      ? prev.map(mail => mail.id === draft.draftMail.id ? draft.draftMail : mail)
+      : [draft.draftMail, ...prev]
+    );
+    setSelectedEmailId(draft.draftMail.id);
+    setSyncStatusText('Entwurf lokal gespeichert; IMAP-Entwürfe werden aktualisiert...');
+    await saveDraftToServer(draft.active, draft.draftMail, message);
+    draftOriginalsRef.current.delete(draft.draftMail.id);
+    setSyncStatusText('Entwurf lokal und im IMAP-Entwürfeordner gespeichert.');
+    triggerPostActionSync('Entwurf gespeichert', [draft.draftMail]);
+  };
+
+  const handleDiscardDraft = (id: string) => {
+    const original = draftOriginalsRef.current.get(id);
+    setEmails(prev => original
+      ? prev.map(mail => mail.id === id ? original : mail)
+      : prev.filter(mail => mail.id !== id || (!!mail.imapUid && !String(mail.id).startsWith('draft-')))
+    );
+    draftOriginalsRef.current.delete(id);
+    if (selectedEmailId === id) setSelectedEmailId(null);
+    setSyncStatusText('Nicht gespeicherter Entwurf verworfen.');
+  };
+
+  useEffect(() => {
+    if (!browserMailCacheLoaded || restoredComposeDraftRef.current) return;
+    restoredComposeDraftRef.current = true;
+    const restored = readJsonStorage<ComposeMailPayload | null>('uniquemail_active_compose_draft', null);
+    if (!restored?.sourceId) return;
+    const draft = createDraftMail(restored);
+    if (!draft) return;
+    setEmails(prev => prev.some(mail => mail.id === draft.draftMail.id)
+      ? prev.map(mail => mail.id === draft.draftMail.id ? draft.draftMail : mail)
+      : [draft.draftMail, ...prev]
+    );
+    setSelectedEmailId(draft.draftMail.id);
+    setComposeMode('draft');
+    setCurrentPage('mail');
+    setIsWritingEmail(true);
+    setSyncStatusText('Automatisch zwischengespeicherten Entwurf wiederhergestellt.');
+  }, [browserMailCacheLoaded]);
 
   const handleEditStoredEmail = (id: string, mode: 'draft' | 'outbox') => {
     setSelectedEmailId(id);
@@ -2884,8 +2988,7 @@ Julia`,
   }, [selectedEmailId, emails, accounts]);
 
   const uniqueAccountsForSync = (preferredAccounts: any[] = []) => {
-    const active = accounts.find(acc => acc.email.toLowerCase() === activeAccountEmail.toLowerCase()) || accounts[0];
-    const ordered = (preferredAccounts.length > 0 ? preferredAccounts : [active]).filter(Boolean);
+    const ordered = [...preferredAccounts, ...accounts].filter(Boolean);
     const seen = new Set<string>();
     return ordered.filter(account => {
       const key = String(account.email || '').toLowerCase();
@@ -2970,6 +3073,20 @@ Julia`,
       void enqueueBackgroundJob(`maintenance-sync:${reason}`, 10, () => runPostActionBackgroundSync(reason, preferredAccounts));
     }, delay);
   };
+
+  useEffect(() => {
+    if (isOffline || accounts.length === 0) return;
+    const initialTimeoutId = window.setTimeout(() => {
+      void enqueueBackgroundJob('maintenance-sync:automatic-initial-all-folders', 10, () => runPostActionBackgroundSync('Automatischer Start-Vollsync'));
+    }, 8000);
+    const intervalId = window.setInterval(() => {
+      void enqueueBackgroundJob('maintenance-sync:automatic-all-folders', 10, () => runPostActionBackgroundSync('Automatischer Vollsync'));
+    }, 5 * 60 * 1000);
+    return () => {
+      window.clearTimeout(initialTimeoutId);
+      window.clearInterval(intervalId);
+    };
+  }, [isOffline, accounts.length]);
 
   const resolveServerFolderPath = (account: any, role: 'deleted' | 'archive' | 'sent' | 'drafts' | 'junk') => {
     const folders = Array.isArray(account?.serverFolders) ? account.serverFolders : [];
@@ -3930,6 +4047,8 @@ Julia`,
               composeMode={composeMode}
               onSendEmail={handleSendEmail}
               onSaveDraft={handleSaveDraft}
+              onAutoSaveDraft={handleAutoSaveDraft}
+              onDiscardDraft={handleDiscardDraft}
               onRetryOutboxEmail={handleRetryOutboxEmail}
               onEditStoredEmail={handleEditStoredEmail}
               onAddContact={handleSaveSuggestedContact}
@@ -4880,6 +4999,25 @@ Julia`,
                         <span className="text-[9.5px] text-purple-600 font-mono font-bold">Zugeordnete User-Signatur</span>
                       </h3>
 
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-4 rounded-lg space-y-2 shadow-sm">
+                        <label htmlFor="signature-account-select" className="block text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                          E-Mail-Konto für diese Signatur
+                        </label>
+                        <select
+                          id="signature-account-select"
+                          value={signatureEditorAccountEmail}
+                          onChange={(event) => setSignatureEditorAccountEmail(event.target.value)}
+                          className="w-full text-xs p-2.5 border border-slate-250 dark:border-slate-700 rounded-md bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-purple-500/25 focus:border-purple-500 outline-none"
+                        >
+                          {accounts.map(account => (
+                            <option key={account.email} value={account.email}>
+                              {(getAccountDisplayName(account) || account.email) + ' <' + account.email + '>'}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">Jedes verbundene Konto besitzt eine eigene, dauerhaft gespeicherte Signatur.</p>
+                      </div>
+
                       <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 p-4 rounded-xl space-y-3 shadow-xs">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
@@ -4911,11 +5049,10 @@ Julia`,
                             </label>
                             <textarea 
                               rows={5}
-                              value={activeSignatureText}
+                              value={signatureEditorText}
                               onChange={(e) => {
-                                setSignatureText(e.target.value);
-                                if (activeAccountEmail) {
-                                  setAccountSignatures(prev => ({ ...prev, [activeAccountEmail]: e.target.value }));
+                                if (signatureEditorAccountEmail) {
+                                  setAccountSignatures(prev => ({ ...prev, [signatureEditorAccountEmail]: e.target.value }));
                                 }
                               }}
                               className="w-full text-xs p-2.5 border border-slate-200 dark:border-slate-700 rounded-lg font-mono text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-950 focus:ring-1 focus:ring-purple-500 outline-none resize-none leading-relaxed"

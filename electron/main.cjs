@@ -10,6 +10,7 @@ const DEFAULT_UPDATE_FEED_URL = 'https://github.com/rakneznar/Unique-Mail-OpenSo
 let PORT = 0;
 let serverProcess = null;
 let mainWindow = null;
+const approvedWindowCloses = new WeakSet();
 let uniqueMailDataPaths = null;
 let lastKnownUpdate = null;
 
@@ -662,6 +663,11 @@ async function createWindow() {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });
+  win.on('close', (event) => {
+    if (approvedWindowCloses.has(win) || win.webContents.isDestroyed()) return;
+    event.preventDefault();
+    win.webContents.send('native:before-app-close');
+  });
 
   win.setMenuBarVisibility(false);
 
@@ -959,7 +965,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.40 <span class="unique-version-current">aktuell</span></h3><ul><li>Der Update-Aufraeumhelfer arbeitet vollstaendig unsichtbar; waehrend der Installation blinken keine CMD-Fenster mehr auf.</li><li>Das Windows-, Desktop- und Installer-Icon nutzt die verfuegbare Symbolflaeche deutlich besser aus.</li><li>Das Unique-Mail-Logo in der App-Kopfzeile wurde vergroessert und bleibt sauber in die vorhandene Titelzeile eingepasst.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.41 <span class="unique-version-current">aktuell</span></h3><ul><li>Manueller, automatischer und aktionsbezogener Sync aktualisieren jetzt alle verbundenen Konten und darin saemtliche IMAP-Ordner.</li><li>Unter Einstellungen kann fuer jedes E-Mail-Konto eine eigene Signatur ausgewaehlt, bearbeitet und dauerhaft gespeichert werden.</li><li>Neue Nachrichten werden bei jeder Aenderung lokal zwischengespeichert; beim Schliessen kann der Entwurf verworfen oder lokal und im IMAP-Entwurfsordner gespeichert werden.</li><li>Beim Beenden der App wird ein geoeffneter Entwurf automatisch gespeichert.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.40</h3><ul><li>Der Update-Aufraeumhelfer arbeitet vollstaendig unsichtbar; waehrend der Installation blinken keine CMD-Fenster mehr auf.</li><li>Das Windows-, Desktop- und Installer-Icon nutzt die verfuegbare Symbolflaeche deutlich besser aus.</li><li>Das Unique-Mail-Logo in der App-Kopfzeile wurde vergroessert und bleibt sauber in die vorhandene Titelzeile eingepasst.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.39</h3><ul><li>Beim Verfassen steht eine sichtbare Signaturauswahl fuer Konto-, Standard- oder keine Signatur bereit.</li><li>Die Aktionsleiste mit Abbrechen, Entwurf und Senden bleibt am unteren Fensterrand sichtbar, waehrend nur der eigentliche Compose-Inhalt scrollt.</li><li>Benutzerordner lassen sich in Electron zuverlaessig durch Gedrueckthalten und Ziehen verschieben; Zielordner werden markiert und die bestaetigte Struktur wird per IMAP synchronisiert.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.38</h3><ul><li>Die gesamte freie obere Titelzeile dient jetzt als klar nutzbare Ziehflaeche; Logo, Schnellaktionen und Fenstersteuerung bleiben normal anklickbar.</li><li>Vollstaendig gespeicherte Nachrichtentexte und Anhaenge werden direkt aus dem persistenten lokalen Cache geliefert, ohne vorherige IMAP-Verbindung.</li><li>Doppelte Body-Abrufe werden zusammengefuehrt; die ausgewaehlte Mail erhaelt Benutzerprioritaet und benachbarte Mails werden sparsam im Leerlauf vorgeladen.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.37</h3><ul><li>Lange HTML- und Textnachrichten besitzen wieder einen eigenen, zuverlaessigen Scrollbereich; Mausradbewegungen im isolierten Mail-Frame werden korrekt weitergereicht.</li><li>Benutzerdefinierte IMAP-Ordner koennen per Drag-and-drop auf einen anderen Ordner gezogen und als Unterordner eingeordnet werden.</li><li>Beim Ablegen kann alternativ der gesamte Inhalt samt Unterordnern in den Zielordner migriert werden; Systemordner und unzulaessige Kreisverschiebungen bleiben geschuetzt.</li></ul></article>',
@@ -1090,7 +1097,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.40',
+        '0.4.41',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');
@@ -1403,6 +1410,13 @@ ipcMain.on('window:maximize', (event) => {
 
 ipcMain.on('window:close', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
+});
+
+ipcMain.on('native:confirm-app-close', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return;
+  approvedWindowCloses.add(win);
+  win.close();
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();

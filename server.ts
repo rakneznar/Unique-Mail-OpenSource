@@ -52,6 +52,24 @@ type SendMailRequest = SyncInboxRequest & {
   }>;
 };
 
+type SaveDraftRequest = SyncInboxRequest & {
+  from: string;
+  to?: string;
+  cc?: string;
+  bcc?: string;
+  subject?: string;
+  html?: string;
+  text?: string;
+  draftsFolder: string;
+  sourceFolder?: string;
+  sourceUid?: number;
+  attachments?: Array<{
+    filename: string;
+    contentType?: string;
+    contentBase64: string;
+  }>;
+};
+
 function repairDecodedText(value: string) {
   if (!value) return value;
   return value.replace(/[ÃÂâðï][\u0080-\uFFFF]{1,12}/g, (run) => {
@@ -728,6 +746,60 @@ async function startServer() {
       });
     } catch (error: any) {
       res.status(502).json({ error: error?.message || "SMTP-Versand fehlgeschlagen." });
+    }
+  });
+
+  app.post("/api/mail/drafts/save", async (req, res) => {
+    const {
+      email, password, imapServer, imapPort, from, to, cc, bcc, subject, html, text,
+      draftsFolder, sourceFolder, sourceUid, attachments,
+    } = req.body as SaveDraftRequest;
+
+    if (!email || !password || !imapServer || !imapPort || !from || !draftsFolder) {
+      return res.status(400).json({ error: "Konto, IMAP-Zugang, Absender und Entwurfsordner sind erforderlich." });
+    }
+
+    const mailOptions: Mail.Options = {
+      from,
+      to: normalizeAddressList(to) || undefined,
+      cc: normalizeAddressList(cc) || undefined,
+      bcc: normalizeAddressList(bcc) || undefined,
+      subject: subject || "(Kein Betreff)",
+      html: html || "",
+      text: text || toTextPreview(html || ""),
+      attachments: buildSmtpAttachments(attachments),
+      date: new Date(),
+    };
+
+    const rawTransporter = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: "unix" });
+    const client = createImapClient({ email, password, imapServer, imapPort });
+    try {
+      const rawInfo = await rawTransporter.sendMail(mailOptions);
+      const rawMessage = Buffer.isBuffer(rawInfo.message) ? rawInfo.message : Buffer.from(String(rawInfo.message || ""));
+      await client.connect();
+      const appendResult = await client.append(draftsFolder, rawMessage, ["\\Draft", "\\Seen"], new Date());
+
+      const oldUid = Number(sourceUid);
+      if (sourceFolder && Number.isFinite(oldUid) && oldUid > 0) {
+        let lock;
+        try {
+          lock = await client.getMailboxLock(sourceFolder);
+          await client.messageDelete([oldUid], { uid: true });
+        } finally {
+          if (lock) lock.release();
+        }
+      }
+
+      res.json({
+        ok: true,
+        folder: draftsFolder,
+        uid: appendResult && typeof appendResult === "object" ? Number((appendResult as any).uid) || undefined : undefined,
+        savedAt: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      res.status(502).json({ error: error?.message || "Entwurf konnte nicht im IMAP-Ordner gespeichert werden." });
+    } finally {
+      await client.logout().catch(() => undefined);
     }
   });
   app.post("/api/feedback/send", async (req, res) => {
