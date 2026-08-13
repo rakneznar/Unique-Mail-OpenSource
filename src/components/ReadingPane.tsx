@@ -545,6 +545,7 @@ a{color:#0078d4;cursor:pointer}
   const [previewAttachment, setPreviewAttachment] = React.useState<{ name: string; type: string; size?: number; url: string } | null>(null);
   const [attachmentContextMenu, setAttachmentContextMenu] = React.useState<{ x: number; y: number; attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string } } | null>(null);
   const [preparedAttachmentDrags, setPreparedAttachmentDrags] = React.useState<Record<string, string>>({});
+  const [attachmentDragError, setAttachmentDragError] = React.useState('');
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const autoSaveGenerationRef = React.useRef(0);
   const composeInitializedRef = React.useRef(false);
@@ -604,14 +605,15 @@ a{color:#0078d4;cursor:pointer}
   };
 
   const startAttachmentDragOut = (event: React.DragEvent, attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
+    event.preventDefault();
+    event.stopPropagation();
     const token = preparedAttachmentDrags[attachmentDragKey(attachment)];
     if (!attachment.contentBase64 || !token) {
-      event.preventDefault();
       void prepareAttachmentDragOut(attachment);
+      setAttachmentDragError('Die Anlage wird noch fuer Drag-and-drop vorbereitet. Bitte kurz warten und erneut ziehen.');
       return;
     }
-    event.dataTransfer.effectAllowed = 'copy';
-    event.dataTransfer.setData('text/plain', attachment.filename);
+    setAttachmentDragError('');
     const nativeApi = (window as any).uniqueMailNative;
     nativeApi?.startAttachmentDrag?.({ token });
   };
@@ -639,6 +641,13 @@ a{color:#0078d4;cursor:pointer}
     void prepareAll();
     return () => { cancelled = true; };
   }, [activeEmail?.id]);
+
+  React.useEffect(() => {
+    const nativeApi = (window as any).uniqueMailNative;
+    return nativeApi?.onAttachmentDragError?.((message: string) => {
+      setAttachmentDragError(message || 'Der Windows-Dateidrag konnte nicht gestartet werden.');
+    });
+  }, []);
 
   const saveAttachmentToDisk = async (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
     if (!attachment.contentBase64) {
@@ -1508,6 +1517,9 @@ a{color:#0078d4;cursor:pointer}
                 </span>
               )}
             </div>
+            {attachmentDragError && (
+              <span className="text-[10px] font-bold text-red-600" role="status">{attachmentDragError}</span>
+            )}
           </div>
         )}
           {attachmentContextMenu && (

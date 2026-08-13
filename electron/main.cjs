@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell, safeStorage } = require('electron');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -244,6 +244,15 @@ function compareSemverLike(a, b) {
     if (da < db) return -1;
   }
   return 0;
+}
+
+function resolveDragIconPath() {
+  const candidates = [
+    path.join(__dirname, 'assets', 'icon.png'),
+    path.join(process.resourcesPath || '', 'app', 'electron', 'assets', 'icon.png'),
+    path.join(process.resourcesPath || '', 'electron', 'assets', 'icon.png')
+  ];
+  return candidates.find(candidate => candidate && fs.existsSync(candidate)) || resolveAppIconPath();
 }
 
 function updateFeedConfigCandidates() {
@@ -987,7 +996,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.43 <span class="unique-version-current">aktuell</span></h3><ul><li>Anhaenge werden vor dem Ziehen sicher in einen lokalen Drag-Cache geschrieben; groessere PDF-Dateien bringen die App dadurch nicht mehr zum Absturz.</li><li>Anhaenge koennen per Drag-and-drop in Explorer, Desktop und kompatible Browser-Uploadfelder kopiert werden.</li><li>PDF-, Word-, Excel-, Bild-, Archiv- und sonstige Anhaenge erhalten klar erkennbare Dateityp-Symbole.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.44 <span class="unique-version-current">aktuell</span></h3><ul><li>Der native Windows-Dateidrag uebernimmt das Drag-Ereignis jetzt exklusiv; der konkurrierende HTML5-Drag, der Abstuerze verursachen konnte, wurde entfernt.</li><li>Der Drag nutzt einen absoluten Cache-Dateipfad und ein kompatibles PNG-Symbol entsprechend der offiziellen Electron-Schnittstelle.</li><li>Fehler beim Vorbereiten oder Starten werden protokolliert und in der App angezeigt, ohne die Anwendung zu beenden.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.43</h3><ul><li>Anhaenge werden vor dem Ziehen sicher in einen lokalen Drag-Cache geschrieben.</li><li>Anhaenge koennen per Drag-and-drop in Explorer, Desktop und kompatible Browser-Uploadfelder kopiert werden.</li><li>PDF-, Word-, Excel-, Bild-, Archiv- und sonstige Anhaenge erhalten klar erkennbare Dateityp-Symbole.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.42</h3><ul><li>Betreffzeilen im Lesebereich koennen jetzt mit der Maus markiert und in die Zwischenablage kopiert werden.</li><li>Die Bild-Aktionsleiste erscheint nur noch beim Ueberfahren eines Bildes im Mailkoerper und verschwindet beim Verlassen wieder.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.41</h3><ul><li>Manueller, automatischer und aktionsbezogener Sync aktualisieren jetzt alle verbundenen Konten und darin saemtliche IMAP-Ordner.</li><li>Unter Einstellungen kann fuer jedes E-Mail-Konto eine eigene Signatur ausgewaehlt, bearbeitet und dauerhaft gespeichert werden.</li><li>Neue Nachrichten werden bei jeder Aenderung lokal zwischengespeichert; beim Schliessen kann der Entwurf verworfen oder lokal und im IMAP-Entwurfsordner gespeichert werden.</li><li>Beim Beenden der App wird ein geoeffneter Entwurf automatisch gespeichert.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.40</h3><ul><li>Der Update-Aufraeumhelfer arbeitet vollstaendig unsichtbar; waehrend der Installation blinken keine CMD-Fenster mehr auf.</li><li>Das Windows-, Desktop- und Installer-Icon nutzt die verfuegbare Symbolflaeche deutlich besser aus.</li><li>Das Unique-Mail-Logo in der App-Kopfzeile wurde vergroessert und bleibt sauber in die vorhandene Titelzeile eingepasst.</li></ul></article>',
@@ -1121,7 +1131,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.43',
+        '0.4.44',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');
@@ -1403,14 +1413,16 @@ ipcMain.on('native:start-attachment-drag', (event, payload) => {
   try {
     const filePath = preparedAttachmentDrags.get(String(payload?.token || ''));
     if (!filePath || !fs.existsSync(filePath)) throw new Error('Die Anlage ist fuer Drag-and-drop noch nicht vorbereitet.');
-    const iconPath = resolveAppIconPath();
-    const dragIcon = nativeImage.createFromPath(iconPath);
-    event.sender.startDrag({
-      file: filePath,
-      icon: dragIcon.isEmpty() ? iconPath : dragIcon.resize({ width: 32, height: 32 })
-    });
+    const absoluteFilePath = path.resolve(filePath);
+    const iconPath = path.resolve(resolveDragIconPath());
+    log(`attachment drag start: file=${absoluteFilePath} icon=${iconPath}`);
+    event.sender.startDrag({ file: absoluteFilePath, icon: iconPath });
+    log(`attachment drag completed: file=${absoluteFilePath}`);
   } catch (error) {
     log(`attachment drag failed safely: ${error.message || String(error)}`);
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('native:attachment-drag-error', error.message || String(error));
+    }
   }
 });
 

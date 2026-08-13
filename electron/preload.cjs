@@ -69,6 +69,12 @@ contextBridge.exposeInMainWorld('uniqueMailNative', {
   saveAttachments: (payload) => ipcRenderer.invoke('native:save-attachments', payload),
   prepareAttachmentDrag: (payload) => ipcRenderer.invoke('native:prepare-attachment-drag', payload),
   startAttachmentDrag: (payload) => ipcRenderer.send('native:start-attachment-drag', payload),
+  onAttachmentDragError: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on('native:attachment-drag-error', listener);
+    return () => ipcRenderer.removeListener('native:attachment-drag-error', listener);
+  },
   getAccountPassword: (email) => ipcRenderer.invoke('native:get-account-password', email),
   setAccountPassword: (payload) => ipcRenderer.invoke('native:set-account-password', payload),
   deleteAccountPassword: (email) => ipcRenderer.invoke('native:delete-account-password', email),
