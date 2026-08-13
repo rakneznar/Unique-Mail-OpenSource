@@ -144,6 +144,22 @@ export default function ReadingPane({
     x: number;
     y: number;
   } | null>(null);
+  const imageActionHideTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelImageActionHide = () => {
+    if (imageActionHideTimeoutRef.current) {
+      clearTimeout(imageActionHideTimeoutRef.current);
+      imageActionHideTimeoutRef.current = null;
+    }
+  };
+
+  const scheduleImageActionHide = () => {
+    cancelImageActionHide();
+    imageActionHideTimeoutRef.current = setTimeout(() => {
+      setImageActionPopup(null);
+      imageActionHideTimeoutRef.current = null;
+    }, 160);
+  };
 
   // State for right-click image operations context menu
   const [imageContextMenu, setImageContextMenu] = useState<{
@@ -424,6 +440,7 @@ a{color:#0078d4;cursor:pointer}
     const handleMouseOver = (event: MouseEvent) => {
       const image = targetElement(event)?.closest('img') as HTMLImageElement | null;
       if (!image || image.contains(event.relatedTarget as Node | null)) return;
+      cancelImageActionHide();
       image.style.cursor = 'context-menu';
       image.tabIndex = 0;
       const pane = document.getElementById('mail-reading-pane');
@@ -436,6 +453,11 @@ a{color:#0078d4;cursor:pointer}
         x: frameRect.left + imageRect.right - paneRect.left - 130,
         y: frameRect.top + imageRect.top - paneRect.top + 10
       });
+    };
+    const handleMouseOut = (event: MouseEvent) => {
+      const image = targetElement(event)?.closest('img') as HTMLImageElement | null;
+      if (!image || image.contains(event.relatedTarget as Node | null)) return;
+      scheduleImageActionHide();
     };
     const handleContextMenu = (event: MouseEvent) => {
       const image = targetElement(event)?.closest('img') as HTMLImageElement | null;
@@ -472,6 +494,7 @@ a{color:#0078d4;cursor:pointer}
 
     frameDocument.addEventListener('click', handleClick, true);
     frameDocument.addEventListener('mouseover', handleMouseOver, true);
+    frameDocument.addEventListener('mouseout', handleMouseOut, true);
     frameDocument.addEventListener('contextmenu', handleContextMenu, true);
     frameDocument.addEventListener('keydown', handleKeyDown, true);
     frameDocument.addEventListener('focusout', handleFocusOut, true);
@@ -485,6 +508,7 @@ a{color:#0078d4;cursor:pointer}
       observer.disconnect();
       frameDocument.removeEventListener('click', handleClick, true);
       frameDocument.removeEventListener('mouseover', handleMouseOver, true);
+      frameDocument.removeEventListener('mouseout', handleMouseOut, true);
       frameDocument.removeEventListener('contextmenu', handleContextMenu, true);
       frameDocument.removeEventListener('keydown', handleKeyDown, true);
       frameDocument.removeEventListener('focusout', handleFocusOut, true);
@@ -493,7 +517,10 @@ a{color:#0078d4;cursor:pointer}
     };
   };
 
-  React.useEffect(() => () => mailBodyFrameCleanupRef.current?.(), []);
+  React.useEffect(() => () => {
+    mailBodyFrameCleanupRef.current?.();
+    cancelImageActionHide();
+  }, []);
 
   // General click handler dismisses active contextual popup overlays
   React.useEffect(() => {
@@ -1309,7 +1336,10 @@ a{color:#0078d4;cursor:pointer}
 
         {/* Email Header bar */}
         <div className="p-6 border-b border-slate-200 bg-slate-50/25">
-          <h1 className="text-xl font-light text-slate-900 leading-snug mb-5">
+          <h1
+            data-window-no-drag
+            className="text-xl font-light text-slate-900 leading-snug mb-5 select-text cursor-text"
+          >
             {activeEmail.subject}
           </h1>
 
@@ -1554,6 +1584,8 @@ a{color:#0078d4;cursor:pointer}
             id="image-hover-action-toolbar"
             className="absolute z-50 bg-[#1e293b] text-white border border-[#334155] shadow-xl rounded-xl p-1 flex items-center space-x-1 animate-fade-in"
             style={{ top: `${imageActionPopup.y}px`, left: `${imageActionPopup.x}px` }}
+            onMouseEnter={cancelImageActionHide}
+            onMouseLeave={scheduleImageActionHide}
           >
             <button
               onClick={() => triggerImageSave(imageActionPopup.url)}
