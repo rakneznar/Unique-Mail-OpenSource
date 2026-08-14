@@ -25,6 +25,7 @@ type MailActionRequest = SyncInboxRequest & {
 type MailBodyRequest = SyncInboxRequest & {
   folder: string;
   uid: number;
+  uidValidity?: string;
   forceRefresh?: boolean;
 };
 
@@ -265,7 +266,7 @@ function buildSmtpAttachments(attachments: SendMailRequest["attachments"]): Mail
 }
 
 function createImapClient({ email, password, imapServer, imapPort }: SyncInboxRequest) {
-  return new ImapFlow({
+  const client = new ImapFlow({
     host: imapServer,
     port: Number(imapPort),
     secure: Number(imapPort) !== 143,
@@ -278,6 +279,10 @@ function createImapClient({ email, password, imapServer, imapPort }: SyncInboxRe
     greetingTimeout: 15000,
     socketTimeout: 30000,
   });
+  // ImapFlow emits connection errors in addition to rejecting pending calls.
+  // Always consume the event so a transient provider disconnect cannot terminate the local server.
+  client.on("error", () => undefined);
+  return client;
 }
 
 function updateEnvelopeFields(existing: any, message: any, folderPath: string, email: string, uidValidity: string) {
@@ -391,6 +396,51 @@ function mailCacheDir() {
   return process.env.UNIQUE_MAIL_CACHE_DIR || path.join(process.cwd(), ".uniquemail-cache");
 }
 
+function permanentMailStoreDir() {
+  return process.env.UNIQUE_MAIL_STORE_DIR || path.join(process.cwd(), ".uniquemail-mailstore");
+}
+
+function stableStoreSegment(value: string) {
+  return Buffer.from(String(value || "").toLowerCase(), "utf8").toString("base64url");
+}
+
+function storedMailBodyPath(email: string, folder: string, uid: number, uidValidity = "") {
+  return path.join(permanentMailStoreDir(), stableStoreSegment(email), stableStoreSegment(folder), stableStoreSegment(uidValidity || "current"), `${uid}.json`);
+}
+
+async function readStoredMailBody(email: string, folder: string, uid: number, uidValidity = "") {
+  try {
+    return JSON.parse(await fs.readFile(storedMailBodyPath(email, folder, uid, uidValidity), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function storedMailBodyExists(email: string, folder: string, uid: number, uidValidity = "") {
+  try {
+    await fs.access(storedMailBodyPath(email, folder, uid, uidValidity));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeStoredMailBody(email: string, folder: string, uid: number, value: unknown, uidValidity = "") {
+  const target = storedMailBodyPath(email, folder, uid, uidValidity);
+  const temporary = `${target}.${process.pid}.tmp`;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(temporary, JSON.stringify(jsonSafe(value)), "utf8");
+  await fs.rename(temporary, target).catch(async error => {
+    await fs.rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  });
+}
+
+function mailMetadataOnly(mail: any) {
+  const { body: _body, attachments: _attachments, draftAttachments: _draftAttachments, ...metadata } = mail || {};
+  return { ...metadata, body: "", bodyLoaded: false };
+}
+
 function mailCachePath(email: string) {
   const safeName = Buffer.from(email.toLowerCase(), "utf8").toString("base64url");
   return path.join(mailCacheDir(), `${safeName}.json`);
@@ -407,7 +457,78 @@ async function readMailCache(email: string) {
 
 async function writeMailCache(email: string, payload: unknown) {
   await fs.mkdir(mailCacheDir(), { recursive: true });
-  await fs.writeFile(mailCachePath(email), JSON.stringify(jsonSafe(payload)), "utf8");
+  const target = mailCachePath(email);
+  const temporary = `${target}.${process.pid}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify(jsonSafe(payload)), "utf8");
+  await fs.rename(temporary, target);
+}
+
+const mailboxPrefetchJobs = new Map<string, Promise<void>>();
+
+function scheduleMailboxPrefetch(config: SyncInboxRequest, emails: any[]) {
+  const key = config.email.toLowerCase();
+  if (mailboxPrefetchJobs.has(key)) return;
+
+  const job = new Promise<void>(resolve => setTimeout(resolve, 350))
+    .then(async () => {
+      const candidates = emails
+        .filter(mail => getMailUid(mail) && (mail.imapFolder || mail.folder))
+        .sort((left, right) => new Date(right.date || 0).getTime() - new Date(left.date || 0).getTime());
+      const missing: any[] = [];
+      for (const mail of candidates) {
+        const uid = getMailUid(mail);
+        const folder = String(mail.imapFolder || mail.folder || "");
+        if (uid && !(await storedMailBodyExists(config.email, folder, uid, String(mail.imapUidValidity || "")))) missing.push(mail);
+      }
+      if (missing.length === 0) return;
+
+      const client = createImapClient(config);
+      try {
+        await client.connect();
+        const byFolder = new Map<string, any[]>();
+        for (const mail of missing) {
+          const folder = String(mail.imapFolder || mail.folder || "");
+          const bucket = byFolder.get(folder) || [];
+          bucket.push(mail);
+          byFolder.set(folder, bucket);
+        }
+
+        for (const [folder, folderMails] of byFolder) {
+          let lock;
+          try {
+            lock = await client.getMailboxLock(folder);
+            const uidValidity = (client.mailbox as any)?.uidValidity?.toString() || "";
+            for (let offset = 0; offset < folderMails.length; offset += 20) {
+              const batch = folderMails.slice(offset, offset + 20);
+              const uidSet = batch.map(mail => getMailUid(mail)).filter(Boolean).join(",");
+              if (!uidSet) continue;
+              for await (const message of client.fetch(uidSet, {
+                uid: true,
+                envelope: true,
+                flags: true,
+                source: true,
+              }, { uid: true })) {
+                const parsed = await buildEmailFromSource(message, folder, config.email, uidValidity);
+                await writeStoredMailBody(config.email, folder, Number(message.uid), parsed, uidValidity);
+                await new Promise(resolve => setTimeout(resolve, 5));
+              }
+            }
+          } catch (error: any) {
+            console.warn("MailStore prefetch folder skipped", { email: config.email, folder, message: error?.message });
+          } finally {
+            if (lock) lock.release();
+          }
+        }
+      } finally {
+        await client.logout().catch(() => undefined);
+      }
+    })
+    .catch((error: any) => {
+      console.warn("MailStore prefetch stopped", { email: config.email, message: error?.message });
+    })
+    .finally(() => mailboxPrefetchJobs.delete(key));
+
+  mailboxPrefetchJobs.set(key, job);
 }
 let aiClient: GoogleGenAI | null = null;
 function getAI() {
@@ -459,7 +580,22 @@ async function startServer() {
     if (!cached) {
       return res.status(404).json({ error: "Kein lokaler Mailcache vorhanden." });
     }
-    res.json(cached);
+    const cachedEmails = Array.isArray(cached.emails) ? cached.emails : [];
+    res.json({
+      ...cached,
+      emails: cachedEmails.map(mailMetadataOnly),
+    });
+  });
+
+  app.post("/api/mail/prefetch-bodies", async (req, res) => {
+    const { email, password, imapServer, imapPort } = req.body as SyncInboxRequest;
+    if (!email || !password || !imapServer || !imapPort) {
+      return res.status(400).json({ error: "E-Mail, Passwort und IMAP-Daten sind erforderlich." });
+    }
+    const cached = await readMailCache(email);
+    const emails = Array.isArray(cached?.emails) ? cached.emails : [];
+    scheduleMailboxPrefetch({ email, password, imapServer, imapPort }, emails);
+    res.status(202).json({ accepted: true, queuedMessages: emails.length });
   });
 
   app.post("/api/mail/sync-inbox", async (req, res) => {
@@ -505,6 +641,7 @@ async function startServer() {
       const cachedPayload = await readMailCache(email);
       const cachedEmails = Array.isArray(cachedPayload?.emails) ? cachedPayload.emails : [];
       const fetchedEmails = [];
+      const legacyBodyMigrations: Promise<void>[] = [];
       const selectableFolders = folders.filter(folder => !folder.flags.some(flag => flag.toLowerCase() === "\\noselect"));
 
       for (const folderInfo of selectableFolders) {
@@ -535,7 +672,10 @@ async function startServer() {
             const uid = Number(message.uid);
             const cachedMail = cachedByUid.get(uid);
             if (cachedMail?.body) {
-              fetchedEmails.push(updateEnvelopeFields(cachedMail, message, folderInfo.path, email, uidValidity));
+              legacyBodyMigrations.push(
+                writeStoredMailBody(email, folderInfo.path, uid, { ...cachedMail, bodyLoaded: true }, uidValidity).catch(() => undefined)
+              );
+              fetchedEmails.push(updateEnvelopeFields(mailMetadataOnly(cachedMail), message, folderInfo.path, email, uidValidity));
             } else {
               fetchedEmails.push(buildEmailFromEnvelope(message, folderInfo.path, email, uidValidity));
             }
@@ -554,8 +694,9 @@ async function startServer() {
       }
 
       fetchedEmails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      await Promise.allSettled(legacyBodyMigrations);
       const syncPayload = {
-        emails: fetchedEmails,
+        emails: fetchedEmails.map(mailMetadataOnly),
         folders,
         syncedAt: new Date().toISOString()
       };
@@ -566,6 +707,7 @@ async function startServer() {
         });
       });
       res.json(syncPayload);
+      scheduleMailboxPrefetch({ email, password, imapServer, imapPort }, syncPayload.emails);
     } catch (error: any) {
       console.error("IMAP Sync Error:", {
         email,
@@ -583,11 +725,18 @@ async function startServer() {
   });
 
   app.post("/api/mail/message-body", async (req, res) => {
-    const { email, password, imapServer, imapPort, folder, uid, forceRefresh } = req.body as MailBodyRequest;
+    const { email, password, imapServer, imapPort, folder, uid, uidValidity: requestedUidValidity = "", forceRefresh } = req.body as MailBodyRequest;
     const uidNumber = Number(uid);
 
     if (!email || !folder || !Number.isFinite(uidNumber) || uidNumber <= 0) {
       return res.status(400).json({ error: "E-Mail, Ordner und UID sind erforderlich." });
+    }
+
+    if (!forceRefresh) {
+      const storedMail = await readStoredMailBody(email, folder, uidNumber, requestedUidValidity);
+      if (storedMail?.body) {
+        return res.json({ email: { ...storedMail, bodyLoaded: true }, cacheHit: true, storage: "mail-store" });
+      }
     }
 
     const cached = await readMailCache(email);
@@ -601,7 +750,9 @@ async function startServer() {
       || (typeof cachedMail?.body === "string" && cachedMail.body.length > 0 && cachedAttachmentsComplete);
 
     if (!forceRefresh && cachedMail && cachedBodyComplete && cachedAttachmentsComplete) {
-      return res.json({ email: { ...cachedMail, bodyLoaded: true }, cacheHit: true });
+      const migratedMail = { ...cachedMail, bodyLoaded: true };
+      await writeStoredMailBody(email, folder, uidNumber, migratedMail, requestedUidValidity || String(cachedMail.imapUidValidity || "")).catch(() => undefined);
+      return res.json({ email: migratedMail, cacheHit: true, storage: "migrated-mail-store" });
     }
 
     if (!password || !imapServer || !imapPort) {
@@ -631,6 +782,8 @@ async function startServer() {
         return res.status(404).json({ error: "Nachricht wurde im IMAP-Ordner nicht gefunden." });
       }
 
+      await writeStoredMailBody(email, folder, uidNumber, parsedEmail, uidValidity);
+
       const cachePayload = cached && typeof cached === "object"
         ? cached
         : { emails: [], folders: [], syncedAt: new Date().toISOString() };
@@ -641,18 +794,18 @@ async function startServer() {
           const cachedUid = getMailUid(mail);
           if (sameFolder(mail.folder || mail.imapFolder, folder) && cachedUid === uidNumber) {
             replaced = true;
-            return { ...mail, ...parsedEmail };
+            return mailMetadataOnly({ ...mail, ...parsedEmail });
           }
-          return mail;
+          return mailMetadataOnly(mail);
         });
-        if (!replaced) cachePayload.emails.push(parsedEmail);
+        if (!replaced) cachePayload.emails.push(mailMetadataOnly(parsedEmail));
         cachePayload.syncedAt = new Date().toISOString();
         await writeMailCache(email, cachePayload).catch((cacheError: any) => {
           console.warn("Mail body cache write skipped", { email, message: cacheError?.message });
         });
       }
 
-      res.json({ email: parsedEmail, cacheHit: false });
+      res.json({ email: parsedEmail, cacheHit: false, storage: "mail-store" });
     } catch (error: any) {
       res.status(502).json({ error: error?.message || "Nachrichtentext konnte nicht vom IMAP-Server geladen werden." });
     } finally {

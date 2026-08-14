@@ -63,6 +63,7 @@ function configurePackagedUserDataPath() {
     settingsDir: path.join(dataRoot, 'Settings'),
     cacheDir: path.join(dataRoot, 'Cache'),
     mailStoreDir: path.join(stableUserDataPath, 'mail-cache'),
+    messageStoreDir: path.join(dataRoot, 'MailStore'),
     logsDir: path.join(dataRoot, 'Logs')
   };
 
@@ -82,6 +83,7 @@ function configurePackagedUserDataPath() {
         settingsDir: legacyInstallDataPath,
         cacheDir: legacyInstallDataPath,
         mailStoreDir: path.join(legacyInstallDataPath, 'mail-cache'),
+        messageStoreDir: path.join(legacyInstallDataPath, 'MailStore'),
         logsDir: legacyInstallDataPath
       };
     } catch {
@@ -103,6 +105,7 @@ function configureTestUserDataPath() {
     settingsDir: path.join(dataRoot, 'Settings'),
     cacheDir: path.join(dataRoot, 'Cache'),
     mailStoreDir: path.join(userData, 'mail-cache'),
+    messageStoreDir: path.join(dataRoot, 'MailStore'),
     logsDir: path.join(dataRoot, 'Logs')
   };
   Object.values(uniqueMailDataPaths).forEach(dir => fs.mkdirSync(dir, { recursive: true }));
@@ -613,7 +616,8 @@ function startServer() {
         PORT: '0',
         UNIQUE_MAIL_DATA_ROOT: uniqueMailDataPaths?.dataRoot || app.getPath('userData'),
         UNIQUE_MAIL_SETTINGS_DIR: uniqueMailDataPaths?.settingsDir || app.getPath('userData'),
-        UNIQUE_MAIL_CACHE_DIR: uniqueMailDataPaths?.mailStoreDir || path.join(app.getPath('userData'), 'mail-cache')
+        UNIQUE_MAIL_CACHE_DIR: uniqueMailDataPaths?.mailStoreDir || path.join(app.getPath('userData'), 'mail-cache'),
+        UNIQUE_MAIL_STORE_DIR: uniqueMailDataPaths?.messageStoreDir || path.join(app.getPath('userData'), 'MailStore')
       },
       stdio: 'pipe',
       windowsHide: true
@@ -996,7 +1000,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.44 <span class="unique-version-current">aktuell</span></h3><ul><li>Der native Windows-Dateidrag uebernimmt das Drag-Ereignis jetzt exklusiv; der konkurrierende HTML5-Drag, der Abstuerze verursachen konnte, wurde entfernt.</li><li>Der Drag nutzt einen absoluten Cache-Dateipfad und ein kompatibles PNG-Symbol entsprechend der offiziellen Electron-Schnittstelle.</li><li>Fehler beim Vorbereiten oder Starten werden protokolliert und in der App angezeigt, ohne die Anwendung zu beenden.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.45 <span class="unique-version-current">aktuell</span></h3><ul><li>Vollstaendige Nachrichtentexte und Anhaenge werden dauerhaft als einzelne Dateien im stabilen lokalen MailStore gespeichert, getrennt vom temporaeren Cache.</li><li>Nach App-Start und jeder Synchronisierung laedt ein deduplizierter Hintergrundprozess fehlende Inhalte aus allen IMAP-Ordnern schrittweise vor.</li><li>Beim Oeffnen wird zuerst nur die einzelne lokale MailStore-Datei gelesen; langsames Parsen und Neuschreiben einer riesigen Konto-JSON entfaellt.</li><li>Bereits geladene Altinhalte werden automatisch migriert und Verbindungsabbrueche des IMAP-Providers koennen den lokalen Server nicht mehr beenden.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.44</h3><ul><li>Der native Windows-Dateidrag uebernimmt das Drag-Ereignis exklusiv; der konkurrierende HTML5-Drag wurde entfernt.</li><li>Der Drag nutzt einen absoluten Cache-Dateipfad und ein kompatibles PNG-Symbol.</li><li>Fehler beim Vorbereiten oder Starten werden protokolliert und in der App angezeigt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.43</h3><ul><li>Anhaenge werden vor dem Ziehen sicher in einen lokalen Drag-Cache geschrieben.</li><li>Anhaenge koennen per Drag-and-drop in Explorer, Desktop und kompatible Browser-Uploadfelder kopiert werden.</li><li>PDF-, Word-, Excel-, Bild-, Archiv- und sonstige Anhaenge erhalten klar erkennbare Dateityp-Symbole.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.42</h3><ul><li>Betreffzeilen im Lesebereich koennen jetzt mit der Maus markiert und in die Zwischenablage kopiert werden.</li><li>Die Bild-Aktionsleiste erscheint nur noch beim Ueberfahren eines Bildes im Mailkoerper und verschwindet beim Verlassen wieder.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.41</h3><ul><li>Manueller, automatischer und aktionsbezogener Sync aktualisieren jetzt alle verbundenen Konten und darin saemtliche IMAP-Ordner.</li><li>Unter Einstellungen kann fuer jedes E-Mail-Konto eine eigene Signatur ausgewaehlt, bearbeitet und dauerhaft gespeichert werden.</li><li>Neue Nachrichten werden bei jeder Aenderung lokal zwischengespeichert; beim Schliessen kann der Entwurf verworfen oder lokal und im IMAP-Entwurfsordner gespeichert werden.</li><li>Beim Beenden der App wird ein geoeffneter Entwurf automatisch gespeichert.</li></ul></article>',
@@ -1131,7 +1136,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.44',
+        '0.4.45',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');

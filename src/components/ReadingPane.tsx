@@ -1580,7 +1580,7 @@ a{color:#0078d4;cursor:pointer}
           {activeEmailBodyPending && (
             <div className="mb-4 flex items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400" role="status">
               <span className="h-2 w-2 rounded-full bg-[#0078d4] animate-pulse" />
-              Vollstaendiger Inhalt wird aus dem lokalen Cache geladen...
+              Nachricht wird aus dem lokalen MailStore geoeffnet...
             </div>
           )}
           {isHtml(activeEmailBodyForDisplay) ? (

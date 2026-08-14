@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem }
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.44';
+const APP_VERSION = '0.4.45';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -1919,8 +1919,12 @@ exit`;
     if (!browserMailCacheLoaded) return;
     const timeoutId = window.setTimeout(() => {
       try {
-        // The complete mailbox remains in the disk cache. LocalStorage only keeps a fast startup snapshot.
-        localStorage.setItem('outlook_emails', JSON.stringify(emails.slice(0, 2000)));
+        // LocalStorage is only a lightweight list snapshot. Full bodies and attachments live in the permanent MailStore.
+        const startupSnapshot = emails.slice(0, 2000).map(mail => {
+          const { body: _body, attachments: _attachments, draftAttachments: _draftAttachments, ...metadata } = mail;
+          return { ...metadata, body: '', bodyLoaded: false };
+        });
+        localStorage.setItem('outlook_emails', JSON.stringify(startupSnapshot));
       } catch (error) {
         console.error('Mail-Schnellcache konnte nicht gespeichert werden.', error);
       }
@@ -2726,6 +2730,7 @@ Julia`,
   const serverDiskCacheLoadStartedRef = useRef(false);
   const messageBodyRequestsRef = useRef<Map<string, Promise<void>>>(new Map());
   const messagePrefetchTimerRef = useRef<number | null>(null);
+  const mailStorePrefetchAccountsRef = useRef<Set<string>>(new Set());
 
   const mergeSyncedEmails = (previous: Email[], accountEmail: string, syncedEmails: Email[]) => {
     const accountLower = accountEmail.toLowerCase();
@@ -2737,9 +2742,19 @@ Julia`,
       const incoming = incomingById.get(mail.id);
       if (!incoming) return mail;
       incomingById.delete(mail.id);
+      const retainedContent = mail.bodyLoaded === true && !!mail.body
+        ? {
+            body: mail.body,
+            bodyLoaded: true,
+            preview: mail.preview,
+            hasAttachment: mail.hasAttachment,
+            attachments: mail.attachments,
+          }
+        : {};
       return {
         ...mail,
         ...incoming,
+        ...retainedContent,
         isPinned: mail.isPinned,
         isFavorite: mail.isFavorite,
         category: mail.category || incoming.category,
@@ -2901,6 +2916,38 @@ Julia`,
     return null;
   };
 
+  useEffect(() => {
+    if (!browserMailCacheLoaded || accounts.length === 0) return;
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        for (const account of accounts) {
+          const key = String(account.email || '').toLowerCase();
+          if (!key || mailStorePrefetchAccountsRef.current.has(key)) continue;
+          const password = await getStoredAccountPasswordNoPrompt(account);
+          if (!password) continue;
+          mailStorePrefetchAccountsRef.current.add(key);
+          try {
+            const response = await fetch('/api/mail/prefetch-bodies', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: account.email,
+                password,
+                imapServer: account.imapServer,
+                imapPort: account.imapPort,
+              }),
+            });
+            if (!response.ok) mailStorePrefetchAccountsRef.current.delete(key);
+          } catch {
+            mailStorePrefetchAccountsRef.current.delete(key);
+          }
+          await new Promise(resolve => window.setTimeout(resolve, 100));
+        }
+      })();
+    }, 1200);
+    return () => window.clearTimeout(timeoutId);
+  }, [browserMailCacheLoaded, accounts]);
+
   const mailBodyNeedsLoading = (mail?: Email) => {
     if (!mail?.imapUid || !mail.imapFolder) return false;
     const bodyLooksBroken = !!mail.body && (mail.body.includes('\\uFFFD') || /[\\u00c3\\u00c2\\u00e2\\u00c6\\u00c5\\u00f0]/.test(mail.body));
@@ -2932,6 +2979,7 @@ Julia`,
           imapPort: account.imapPort,
           folder: mail.imapFolder,
           uid: mail.imapUid,
+          uidValidity: mail.imapUidValidity,
           forceRefresh
         })
       });
