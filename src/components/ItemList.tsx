@@ -452,6 +452,11 @@ export default function ItemList({
           {virtualEmails.map((email) => {
             const isSelected = selectedEmailId === email.id;
             const isMultiSelected = selectedEmailIds.includes(email.id);
+            const normalizedFolder = String(email.imapFolder || email.folder || selectedFolder || '').toLowerCase();
+            const showRecipient = /(^|[\\/._ -])(sent|gesendet|sent items|gesendete elemente|outbox|postausgang)([\\/._ -]|$)/i.test(normalizedFolder);
+            const listParty = showRecipient
+              ? (email.recipientEmail || email.recipientName || 'Kein Empfaenger')
+              : email.sender;
             return (
               <div
                 id={`email-item-${email.id}`}
@@ -505,7 +510,7 @@ export default function ItemList({
 
                 <div className="flex justify-between items-start mb-1">
                   <span className={`text-[11.5px] truncate max-w-[190px] ${!email.isRead ? 'font-extrabold text-slate-900 dark:text-slate-100' : 'text-slate-700 dark:text-slate-300 font-medium'}`}>
-                    {email.sender}
+                    {listParty}
                   </span>
                   <div className="flex items-center space-x-1.5 shrink-0">
                     {email.hasAttachment && (

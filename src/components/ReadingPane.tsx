@@ -546,6 +546,8 @@ a{color:#0078d4;cursor:pointer}
   const [attachmentContextMenu, setAttachmentContextMenu] = React.useState<{ x: number; y: number; attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string } } | null>(null);
   const [preparedAttachmentDrags, setPreparedAttachmentDrags] = React.useState<Record<string, string>>({});
   const [attachmentDragError, setAttachmentDragError] = React.useState('');
+  const [selectedAttachmentIndexes, setSelectedAttachmentIndexes] = React.useState<number[]>([]);
+  const attachmentSelectionAnchorRef = React.useRef<number | null>(null);
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const autoSaveGenerationRef = React.useRef(0);
   const composeInitializedRef = React.useRef(false);
@@ -558,6 +560,11 @@ a{color:#0078d4;cursor:pointer}
     window.addEventListener('keydown', handlePreviewKeyDown);
     return () => window.removeEventListener('keydown', handlePreviewKeyDown);
   }, [previewAttachment]);
+
+  React.useEffect(() => {
+    setSelectedAttachmentIndexes([]);
+    attachmentSelectionAnchorRef.current = null;
+  }, [activeEmail?.id]);
 
   const fileToAttachmentPayload = (file: File) => new Promise<ComposeAttachmentPayload>((resolve, reject) => {
     const reader = new FileReader();
@@ -670,6 +677,43 @@ a{color:#0078d4;cursor:pointer}
     const result = await nativeApi?.saveAttachments?.({ attachments, directory: attachmentDownloadDirectory });
     if (result?.ok) alert(`${result.filePaths.length} Anlage(n) gespeichert in: ${result.directory}`);
     else alert(result?.error || 'Anlagen konnten nicht gespeichert werden.');
+  };
+
+  const saveSelectedAttachmentsToDisk = async () => {
+    const attachments = (activeEmail?.attachments || [])
+      .filter((_, index) => selectedAttachmentIndexes.includes(index))
+      .filter(item => item.contentBase64);
+    if (attachments.length === 0) {
+      alert('Die ausgewaehlten Anlagen sind noch nicht vollstaendig lokal geladen. Bitte Nachricht aktualisieren und erneut versuchen.');
+      return;
+    }
+    const nativeApi = (window as any).uniqueMailNative;
+    const result = await nativeApi?.saveAttachments?.({ attachments, directory: attachmentDownloadDirectory });
+    if (result?.ok) alert(`${result.filePaths.length} ausgewaehlte Anlage(n) gespeichert in: ${result.directory}`);
+    else alert(result?.error || 'Die ausgewaehlten Anlagen konnten nicht gespeichert werden.');
+  };
+
+  const selectAttachment = (index: number, event: React.MouseEvent<HTMLButtonElement>) => {
+    const attachmentCount = activeEmail?.attachments?.length || 0;
+    const additive = event.ctrlKey || event.metaKey;
+    if (event.shiftKey && attachmentSelectionAnchorRef.current !== null) {
+      const start = Math.min(attachmentSelectionAnchorRef.current, index);
+      const end = Math.max(attachmentSelectionAnchorRef.current, index);
+      const range = Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
+      setSelectedAttachmentIndexes(previous => additive ? Array.from(new Set([...previous, ...range])).sort((a, b) => a - b) : range);
+      return;
+    }
+    attachmentSelectionAnchorRef.current = index;
+    setSelectedAttachmentIndexes(previous => additive
+      ? (previous.includes(index) ? previous.filter(item => item !== index) : [...previous, index].sort((a, b) => a - b))
+      : [index]);
+    if (index >= attachmentCount) setSelectedAttachmentIndexes([]);
+  };
+
+  const selectAllAttachments = () => {
+    const count = activeEmail?.attachments?.length || 0;
+    setSelectedAttachmentIndexes(Array.from({ length: count }, (_, index) => index));
+    attachmentSelectionAnchorRef.current = count > 0 ? 0 : null;
   };
   const openFilePreview = (file: File) => {
     setPreviewAttachment({
@@ -1484,7 +1528,19 @@ a{color:#0078d4;cursor:pointer}
         )}
         {/* Attachments panel if checked */}
         {activeEmail.hasAttachment && (
-          <div className="px-6 py-2.5 border-b border-slate-200 bg-[#fbfbfb] flex items-center space-x-3 text-xs text-slate-600 relative">
+          <div
+            className="px-6 py-2.5 border-b border-slate-200 bg-[#fbfbfb] flex flex-wrap items-center gap-2 text-xs text-slate-600 relative"
+            role="listbox"
+            aria-label="Anhaenge"
+            aria-multiselectable="true"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+                event.preventDefault();
+                selectAllAttachments();
+              }
+            }}
+          >
             <Paperclip className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <span className="font-bold text-[10px] text-slate-400 uppercase tracking-wider">Anhänge:</span>
             <button
@@ -1494,20 +1550,41 @@ a{color:#0078d4;cursor:pointer}
             >
               Alle herunterladen
             </button>
+            <button
+              type="button"
+              onClick={selectedAttachmentIndexes.length === (activeEmail.attachments || []).length ? () => setSelectedAttachmentIndexes([]) : selectAllAttachments}
+              className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-extrabold text-slate-600 hover:bg-slate-100"
+            >
+              {selectedAttachmentIndexes.length === (activeEmail.attachments || []).length && selectedAttachmentIndexes.length > 0 ? 'Auswahl aufheben' : 'Alle auswaehlen'}
+            </button>
+            <button
+              type="button"
+              onClick={saveSelectedAttachmentsToDisk}
+              disabled={selectedAttachmentIndexes.length === 0}
+              className="px-2.5 py-1 rounded-lg border border-[#0078d4] bg-white text-[10px] font-extrabold text-[#0078d4] hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
+            >
+              Auswahl herunterladen ({selectedAttachmentIndexes.length})
+            </button>
             <div className="flex flex-wrap gap-2">
               {(activeEmail.attachments || []).length > 0 ? activeEmail.attachments!.map((attachment, index) => (
                 <button
                   key={`${attachment.filename}-${index}`}
                   type="button"
-                  onClick={() => openPayloadPreview(attachment)}
+                  role="option"
+                  aria-selected={selectedAttachmentIndexes.includes(index)}
+                  onClick={(event) => selectAttachment(index, event)}
+                  onDoubleClick={() => openPayloadPreview(attachment)}
                   draggable={!!attachment.contentBase64}
                   onMouseEnter={() => void prepareAttachmentDragOut(attachment)}
                   onFocus={() => void prepareAttachmentDragOut(attachment)}
                   onDragStart={(event) => startAttachmentDragOut(event, attachment)}
                   onContextMenu={(event) => { event.preventDefault(); setAttachmentContextMenu({ x: event.clientX, y: event.clientY, attachment }); }}
-                  className="bg-white border border-slate-200 hover:bg-slate-55 px-2.5 py-1 rounded-md text-[10.5px] cursor-pointer font-bold flex items-center gap-1.5 text-[#0078d4] transition-all hover:shadow-xs max-w-[300px]"
-                  title={attachment.contentBase64 ? (preparedAttachmentDrags[attachmentDragKey(attachment)] ? 'Klicken für Vorschau oder in Explorer/Desktop/Uploadfeld ziehen' : 'Drag-and-drop wird vorbereitet...') : 'Anlage nachladen, dann Vorschau öffnen'}
+                  className={`${selectedAttachmentIndexes.includes(index) ? 'bg-blue-50 border-[#0078d4] ring-1 ring-[#0078d4]/30' : 'bg-white border-slate-200 hover:bg-slate-50'} border px-2.5 py-1 rounded-md text-[10.5px] cursor-pointer font-bold flex items-center gap-1.5 text-[#0078d4] transition-all hover:shadow-xs max-w-[300px]`}
+                  title={attachment.contentBase64 ? (preparedAttachmentDrags[attachmentDragKey(attachment)] ? 'Klicken zum Auswaehlen, Strg/Shift fuer Mehrfachauswahl, Doppelklick fuer Vorschau' : 'Drag-and-drop wird vorbereitet...') : 'Anlage nachladen, dann Vorschau oeffnen'}
                 >
+                  <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selectedAttachmentIndexes.includes(index) ? 'border-[#0078d4] bg-[#0078d4] text-white' : 'border-slate-300 bg-white text-transparent'}`}>
+                    <Check className="h-3 w-3" />
+                  </span>
                   {renderAttachmentTypeIcon(attachment.filename, attachment.contentType)}
                   <span className="truncate">{attachment.filename}{attachment.size ? ` (${Math.max(1, Math.round(attachment.size / 1024))} KB)` : ''}</span>
                 </button>
