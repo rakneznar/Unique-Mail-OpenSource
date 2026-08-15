@@ -14,11 +14,11 @@ import ItemList from './components/ItemList';
 import ReadingPane, { ComposeMailPayload, ComposeMode } from './components/ReadingPane';
 import ArchTab from './components/ArchTab';
 import NotesView from './components/NotesView';
-import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem } from './types';
+import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, KnownRecipient } from './types';
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.47';
+const APP_VERSION = '0.4.48';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -74,6 +74,38 @@ const hashAppLockPassword = async (password: string, salt: string) => {
 };
 const DEFAULT_CONTACT_SORT_LABELS = ['Newsletter', 'Privat', 'Beruflich'];
 const DEFAULT_MAIL_DATE_FORMAT = 'dd.MM.yyyy';
+const RECIPIENT_HISTORY_STORAGE_KEY = 'uniquemail_recipient_history';
+
+const sanitizeRecipientHistory = (value: unknown): KnownRecipient[] => {
+  if (!Array.isArray(value)) return [];
+  const byEmail = new Map<string, KnownRecipient>();
+  value.forEach(item => {
+    const email = String(item?.email || '').trim().toLowerCase();
+    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)) return;
+    const candidate: KnownRecipient = {
+      email,
+      displayName: String(item?.displayName || '').trim(),
+      useCount: Math.max(1, Number(item?.useCount) || 1),
+      lastUsedAt: String(item?.lastUsedAt || ''),
+    };
+    const existing = byEmail.get(email);
+    if (!existing || candidate.lastUsedAt >= existing.lastUsedAt) byEmail.set(email, candidate);
+  });
+  return Array.from(byEmail.values())
+    .sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt) || b.useCount - a.useCount)
+    .slice(0, 500);
+};
+
+const parseRecipientAddressList = (value?: string) => String(value || '')
+  .split(/[;,]/)
+  .map(entry => {
+    const trimmed = entry.trim();
+    const bracketMatch = trimmed.match(/<([^>]+)>/);
+    const email = (bracketMatch ? bracketMatch[1] : trimmed).trim().toLowerCase();
+    const displayName = bracketMatch ? trimmed.slice(0, bracketMatch.index).replace(/^["']|["']$/g, '').trim() : '';
+    return { email, displayName };
+  })
+  .filter(entry => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(entry.email));
 const MAIL_DATE_FORMAT_OPTIONS = [
   { value: 'dd.MM.yyyy', de: '04.07.2026', en: '04.07.2026' },
   { value: 'dd.MM.yyyy HH:mm', de: '04.07.2026 13:24', en: '04.07.2026 13:24' },
@@ -818,6 +850,7 @@ exit`;
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(() => localStorage.getItem('uniquemail_ui_language') === 'en' ? 'en' : 'de');
   const [mailDateFormat, setMailDateFormat] = useState<string>(() => localStorage.getItem('uniquemail_mail_date_format') || DEFAULT_MAIL_DATE_FORMAT);
   const [attachmentDownloadDirectory, setAttachmentDownloadDirectory] = useState<string>(() => localStorage.getItem('uniquemail_attachment_download_directory') || '');
+  const [recipientHistory, setRecipientHistory] = useState<KnownRecipient[]>(() => sanitizeRecipientHistory(readJsonStorage(RECIPIENT_HISTORY_STORAGE_KEY, [])));
   const isEnglish = uiLanguage === 'en';
 
   const readSenderList = (storageKey: string) => {
@@ -1049,7 +1082,7 @@ exit`;
     }
     const payload = {
       app: 'Unique Mail',
-      schema: 'unique-mail.settings.v6',
+      schema: 'unique-mail.settings.v7',
       version: APP_VERSION,
       exportedAt: new Date().toISOString(),
       settings: {
@@ -1087,6 +1120,7 @@ exit`;
           tasks,
           calendarItems: calendarItems.filter(item => !isSandboxCalendarItem(item)),
           categoriesList,
+          recipientHistory,
           folderFavorites: normalizeImportedArray(readLocalStorageJson('uniquemail_folder_favorites', [])),
           quickSteps,
           mailPreferences: sanitizeMailPreferences(emails)
@@ -1200,6 +1234,9 @@ exit`;
         if (Array.isArray(settings.workspace.categoriesList)) {
           const importedCategories = settings.workspace.categoriesList.filter((item: any) => item && typeof item.name === 'string' && typeof item.color === 'string');
           if (importedCategories.length > 0) setCategoriesList(importedCategories);
+        }
+        if (Array.isArray(settings.workspace.recipientHistory)) {
+          setRecipientHistory(sanitizeRecipientHistory(settings.workspace.recipientHistory));
         }
         if (Array.isArray(settings.workspace.quickSteps)) setQuickSteps(settings.workspace.quickSteps);
         if (Array.isArray(settings.workspace.folderFavorites)) {
@@ -1316,6 +1353,11 @@ exit`;
   useEffect(() => {
     localStorage.setItem('uniquemail_attachment_download_directory', attachmentDownloadDirectory);
   }, [attachmentDownloadDirectory]);
+
+  useEffect(() => {
+    localStorage.setItem(RECIPIENT_HISTORY_STORAGE_KEY, JSON.stringify(recipientHistory));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+  }, [recipientHistory]);
 
   const handleChooseAttachmentDownloadDirectory = async () => {
     const nativeApi = (window as any).uniqueMailNative;
@@ -2324,6 +2366,26 @@ Julia`,
       : acc
     ));
   };
+  const rememberMessageRecipients = (message: ComposeMailPayload) => {
+    const ownAddresses = new Set(accounts.map(account => String(account.email || '').trim().toLowerCase()).filter(Boolean));
+    const usedAt = new Date().toISOString();
+    const parsed = [...parseRecipientAddressList(message.to), ...parseRecipientAddressList(message.cc), ...parseRecipientAddressList(message.bcc)]
+      .filter(entry => !ownAddresses.has(entry.email));
+    if (parsed.length === 0) return;
+    setRecipientHistory(previous => {
+      const byEmail = new Map<string, KnownRecipient>(previous.map(item => [item.email.toLowerCase(), item]));
+      parsed.forEach(entry => {
+        const existing = byEmail.get(entry.email);
+        byEmail.set(entry.email, {
+          email: entry.email,
+          displayName: entry.displayName || existing?.displayName || '',
+          useCount: (existing?.useCount || 0) + 1,
+          lastUsedAt: usedAt,
+        });
+      });
+      return sanitizeRecipientHistory(Array.from(byEmail.values()));
+    });
+  };
   const handleSendEmail = async (message: ComposeMailPayload) => {
     const requestedAccountEmail = message.accountEmail || activeAccountEmail;
     const active = accounts.find(acc => acc.email.toLowerCase() === requestedAccountEmail.toLowerCase()) || accounts[0];
@@ -2363,6 +2425,7 @@ Julia`,
     setSelectedFolder('outbox');
     setSelectedEmailId(queuedId);
     setSyncStatusText('E-Mail wurde in den Postausgang gelegt. Versand läuft im Hintergrund...');
+    rememberMessageRecipients(message);
 
     void enqueueBackgroundJob(`send:${queuedId}`, 90, async () => {
       const failQueuedMail = (errorMessage: string) => {
@@ -4116,6 +4179,7 @@ Julia`,
               attachmentDownloadDirectory={attachmentDownloadDirectory}
               accounts={accounts}
               activeAccountEmail={activeAccountEmail}
+              recipientHistory={recipientHistory}
               onCreateCalendarItemForDate={handleCreateCalendarItemForDate}
             />
           </>

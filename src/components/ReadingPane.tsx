@@ -9,7 +9,7 @@ import {
   Paperclip, Mail, Phone, MapPin, Building, Briefcase, Calendar, 
   Clock, CheckSquare, Code, Check, Send, Copy, FileText, FileSpreadsheet, FileArchive, FileImage, ShieldAlert, Signature
 } from 'lucide-react';
-import { Email, Contact, Task, CalendarItem, CalendarItemDraft } from '../types';
+import { Email, Contact, Task, CalendarItem, CalendarItemDraft, KnownRecipient } from '../types';
 
 export interface ComposeAttachmentPayload {
   filename: string;
@@ -70,6 +70,7 @@ interface ReadingPaneProps {
   attachmentDownloadDirectory?: string;
   accounts?: any[];
   activeAccountEmail?: string;
+  recipientHistory?: KnownRecipient[];
 }
 
 export default function ReadingPane({
@@ -111,12 +112,15 @@ export default function ReadingPane({
   onBlockSender,
   attachmentDownloadDirectory = '',
   accounts = [],
-  activeAccountEmail = ''
+  activeAccountEmail = '',
+  recipientHistory = []
 }: ReadingPaneProps) {
   // Local state for mail editor inputs
   const [toInput, setToInput] = useState('');
   const [ccInput, setCcInput] = useState('');
   const [bccInput, setBccInput] = useState('');
+  const [activeRecipientField, setActiveRecipientField] = useState<'to' | 'cc' | 'bcc' | null>(null);
+  const [highlightedRecipientIndex, setHighlightedRecipientIndex] = useState(0);
   const [composeAccountEmail, setComposeAccountEmail] = useState('');
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [subjectInput, setSubjectInput] = useState('');
@@ -800,6 +804,130 @@ a{color:#0078d4;cursor:pointer}
     });
   };
 
+  type RecipientCandidate = { email: string; displayName: string; useCount: number; lastUsedAt: string };
+  const recipientCandidates = React.useMemo<RecipientCandidate[]>(() => {
+    const ownAddresses = new Set(accountOptions.map(account => String(account.email || '').trim().toLowerCase()).filter(Boolean));
+    const candidates = new Map<string, RecipientCandidate>();
+    const addCandidate = (emailValue?: string, displayNameValue?: string, useCount = 0, lastUsedAt = '') => {
+      const rawEmail = String(emailValue || '').trim();
+      const bracketMatch = rawEmail.match(/<([^>]+)>/);
+      const email = (bracketMatch ? bracketMatch[1] : rawEmail).trim().toLowerCase();
+      if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email) || ownAddresses.has(email)) return;
+      const inlineName = bracketMatch ? rawEmail.slice(0, bracketMatch.index).replace(/^['"]|['"]$/g, '').trim() : '';
+      const displayName = String(displayNameValue || inlineName || '').trim();
+      const existing = candidates.get(email);
+      candidates.set(email, {
+        email,
+        displayName: displayName || existing?.displayName || '',
+        useCount: Math.max(useCount, existing?.useCount || 0),
+        lastUsedAt: lastUsedAt > (existing?.lastUsedAt || '') ? lastUsedAt : existing?.lastUsedAt || '',
+      });
+    };
+
+    recipientHistory.forEach(item => addCandidate(item.email, item.displayName, item.useCount, item.lastUsedAt));
+    contacts.forEach(contact => addCandidate(contact.email, `${contact.firstName || ''} ${contact.lastName || ''}`.trim(), 1));
+    emails.forEach(email => {
+      addCandidate(email.senderEmail, email.sender, 1, email.date);
+      splitAddressList(email.recipientEmail).forEach((recipient, index) => addCandidate(recipient, index === 0 ? email.recipientName : '', 1, email.date));
+      splitAddressList(email.ccEmail).forEach(recipient => addCandidate(recipient, '', 1, email.date));
+    });
+    return Array.from(candidates.values());
+  }, [accountOptions, contacts, emails, recipientHistory]);
+
+  const recipientValueForField = (field: 'to' | 'cc' | 'bcc') => field === 'to' ? toInput : field === 'cc' ? ccInput : bccInput;
+  const currentRecipientQuery = (value: string) => value.slice(Math.max(value.lastIndexOf(','), value.lastIndexOf(';')) + 1).trim().toLowerCase();
+  const visibleRecipientSuggestions = React.useMemo(() => {
+    if (!activeRecipientField) return [];
+    const query = currentRecipientQuery(recipientValueForField(activeRecipientField));
+    if (!query) return [];
+    return recipientCandidates
+      .filter(candidate => candidate.email.includes(query) || candidate.displayName.toLowerCase().includes(query))
+      .sort((a, b) => {
+        const aPrefix = a.email.startsWith(query) || a.displayName.toLowerCase().startsWith(query) ? 1 : 0;
+        const bPrefix = b.email.startsWith(query) || b.displayName.toLowerCase().startsWith(query) ? 1 : 0;
+        return bPrefix - aPrefix || b.useCount - a.useCount || b.lastUsedAt.localeCompare(a.lastUsedAt) || a.email.localeCompare(b.email);
+      })
+      .slice(0, 8);
+  }, [activeRecipientField, toInput, ccInput, bccInput, recipientCandidates]);
+
+  const chooseRecipientSuggestion = (field: 'to' | 'cc' | 'bcc', candidate: RecipientCandidate) => {
+    const value = recipientValueForField(field);
+    const separatorIndex = Math.max(value.lastIndexOf(','), value.lastIndexOf(';'));
+    const prefix = separatorIndex >= 0 ? `${value.slice(0, separatorIndex + 1).trimEnd()} ` : '';
+    const formatted = candidate.displayName ? `${candidate.displayName} <${candidate.email}>` : candidate.email;
+    const nextValue = `${prefix}${formatted}`;
+    if (field === 'to') setToInput(nextValue);
+    else if (field === 'cc') setCcInput(nextValue);
+    else setBccInput(nextValue);
+    setActiveRecipientField(null);
+    setHighlightedRecipientIndex(0);
+  };
+
+  const handleRecipientKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, field: 'to' | 'cc' | 'bcc') => {
+    if (visibleRecipientSuggestions.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setHighlightedRecipientIndex(index => (index + 1) % visibleRecipientSuggestions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setHighlightedRecipientIndex(index => (index - 1 + visibleRecipientSuggestions.length) % visibleRecipientSuggestions.length);
+    } else if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault();
+      chooseRecipientSuggestion(field, visibleRecipientSuggestions[Math.min(highlightedRecipientIndex, visibleRecipientSuggestions.length - 1)]);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setActiveRecipientField(null);
+    }
+  };
+
+  const renderRecipientAutocomplete = (
+    field: 'to' | 'cc' | 'bcc',
+    value: string,
+    setValue: React.Dispatch<React.SetStateAction<string>>,
+    placeholder: string
+  ) => (
+    <div className="relative min-w-0 flex-1">
+      <input
+        type="text"
+        value={value}
+        onChange={(event) => {
+          setValue(event.target.value);
+          setActiveRecipientField(field);
+          setHighlightedRecipientIndex(0);
+        }}
+        onFocus={() => { setActiveRecipientField(field); setHighlightedRecipientIndex(0); }}
+        onBlur={() => window.setTimeout(() => setActiveRecipientField(current => current === field ? null : current), 120)}
+        onKeyDown={(event) => handleRecipientKeyDown(event, field)}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={activeRecipientField === field && visibleRecipientSuggestions.length > 0}
+        aria-controls={`recipient-suggestions-${field}`}
+        autoComplete="off"
+        className="w-full px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-xl bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[11.5px] transition-all font-mono"
+        placeholder={placeholder}
+      />
+      {activeRecipientField === field && visibleRecipientSuggestions.length > 0 && (
+        <div id={`recipient-suggestions-${field}`} role="listbox" className="absolute left-0 right-0 top-full z-[10030] mt-1 max-h-64 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#111827] py-1 shadow-xl">
+          {visibleRecipientSuggestions.map((candidate, index) => (
+            <button
+              key={candidate.email}
+              type="button"
+              role="option"
+              aria-selected={index === highlightedRecipientIndex}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setHighlightedRecipientIndex(index)}
+              onClick={() => chooseRecipientSuggestion(field, candidate)}
+              className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left ${index === highlightedRecipientIndex ? 'bg-blue-50 dark:bg-blue-950/40' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            >
+              <span className="min-w-0 truncate text-[11.5px] font-bold text-slate-800 dark:text-slate-100">{candidate.displayName || candidate.email}</span>
+              <span className="shrink-0 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400">{candidate.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   // Handle auto-population of replies, forwards, drafts and outbox messages.
   React.useEffect(() => {
     if (isWritingEmail) {
@@ -997,13 +1125,7 @@ a{color:#0078d4;cursor:pointer}
           <div className="grid grid-cols-[60px_1fr] items-center text-xs">
             <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">An:</span>
             <div className="flex items-center gap-2">
-              <input 
-                type="text" 
-                value={toInput}
-                onChange={(e) => setToInput(e.target.value)}
-                className="flex-1 px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-xl bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[11.5px] transition-all font-mono"
-                placeholder="empfaenger@domain.de"
-              />
+              {renderRecipientAutocomplete('to', toInput, setToInput, 'Name oder empfaenger@domain.de')}
               <button
                 type="button"
                 onClick={() => setShowCcBcc(prev => !prev)}
@@ -1017,23 +1139,11 @@ a{color:#0078d4;cursor:pointer}
             <>
               <div className="grid grid-cols-[60px_1fr] items-center text-xs">
                 <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">CC:</span>
-                <input
-                  type="text"
-                  value={ccInput}
-                  onChange={(e) => setCcInput(e.target.value)}
-                  className="px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-xl bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[11.5px] transition-all font-mono"
-                  placeholder="kopie@domain.de"
-                />
+                {renderRecipientAutocomplete('cc', ccInput, setCcInput, 'Name oder kopie@domain.de')}
               </div>
               <div className="grid grid-cols-[60px_1fr] items-center text-xs">
                 <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">BCC:</span>
-                <input
-                  type="text"
-                  value={bccInput}
-                  onChange={(e) => setBccInput(e.target.value)}
-                  className="px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-xl bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[11.5px] transition-all font-mono"
-                  placeholder="blindkopie@domain.de"
-                />
+                {renderRecipientAutocomplete('bcc', bccInput, setBccInput, 'Name oder blindkopie@domain.de')}
               </div>
             </>
           )}

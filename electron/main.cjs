@@ -1000,7 +1000,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.47 <span class="unique-version-current">aktuell</span></h3><ul><li>Nach kurzem Verweilen auf einem Anhang erscheint automatisch die interne Vorschau.</li><li>Ein Doppelklick oeffnet den Anhang mit der unter Windows hinterlegten Standard-App.</li><li>Das Rechtsklickmenue bietet sowohl die interne Vorschau als auch das Oeffnen mit der Standard-App an.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.48 <span class="unique-version-current">aktuell</span></h3><ul><li>An, CC und BCC vervollstaendigen Empfaenger bereits ab dem ersten Zeichen anhand von Anzeigename oder E-Mail-Adresse.</li><li>Adressbuch, lokale Mailkontakte und haeufig verwendete Empfaenger werden zusammengefuehrt und nach Relevanz sortiert.</li><li>Verwendete Empfaenger werden dauerhaft lokal gespeichert und mit dem Einstellungs-Export uebertragen.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.47</h3><ul><li>Nach kurzem Verweilen auf einem Anhang erscheint automatisch die interne Vorschau.</li><li>Ein Doppelklick oeffnet den Anhang mit der unter Windows hinterlegten Standard-App.</li><li>Das Rechtsklickmenue bietet sowohl die interne Vorschau als auch das Oeffnen mit der Standard-App an.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.46</h3><ul><li>Anhaenge lassen sich einzeln, mit Strg oder Shift als Bereich sowie mit Strg+A vollstaendig auswaehlen.</li><li>Die markierte Anlagenauswahl kann gemeinsam gespeichert werden; die Vorschau bleibt per Doppelklick erreichbar.</li><li>In Gesendet und Postausgang zeigt die Nachrichtenliste die Empfaengeradresse statt der eigenen Absenderadresse.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.45</h3><ul><li>Vollstaendige Nachrichtentexte und Anhaenge werden dauerhaft als einzelne Dateien im stabilen lokalen MailStore gespeichert, getrennt vom temporaeren Cache.</li><li>Nach App-Start und jeder Synchronisierung laedt ein deduplizierter Hintergrundprozess fehlende Inhalte aus allen IMAP-Ordnern schrittweise vor.</li><li>Beim Oeffnen wird zuerst nur die einzelne lokale MailStore-Datei gelesen; langsames Parsen und Neuschreiben einer riesigen Konto-JSON entfaellt.</li><li>Bereits geladene Altinhalte werden automatisch migriert und Verbindungsabbrueche des IMAP-Providers koennen den lokalen Server nicht mehr beenden.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.44</h3><ul><li>Der native Windows-Dateidrag uebernimmt das Drag-Ereignis exklusiv; der konkurrierende HTML5-Drag wurde entfernt.</li><li>Der Drag nutzt einen absoluten Cache-Dateipfad und ein kompatibles PNG-Symbol.</li><li>Fehler beim Vorbereiten oder Starten werden protokolliert und in der App angezeigt.</li></ul></article>',
@@ -1138,7 +1139,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.47',
+        '0.4.48',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');

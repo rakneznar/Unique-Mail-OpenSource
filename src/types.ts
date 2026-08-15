@@ -47,6 +47,13 @@ export interface Email {
   reminderTriggered?: boolean; // triggered state tracker
 }
 
+export interface KnownRecipient {
+  email: string;
+  displayName?: string;
+  useCount: number;
+  lastUsedAt: string;
+}
+
 export interface CalendarItemDraft {
   title: string;
   start: string;
