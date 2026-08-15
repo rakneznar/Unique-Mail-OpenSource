@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Paperclip, Mail, Phone, MapPin, Building, Briefcase, Calendar, 
-  Clock, CheckSquare, Code, Check, Send, Copy, FileText, FileSpreadsheet, FileArchive, FileImage, ShieldAlert, Signature
+  Clock, CheckSquare, Code, Check, Send, Copy, FileText, FileSpreadsheet, FileArchive, FileImage, ShieldAlert, Signature, ExternalLink
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, CalendarItemDraft, KnownRecipient } from '../types';
 
@@ -1068,6 +1068,25 @@ a{color:#0078d4;cursor:pointer}
     }
   };
 
+  const detachComposeWindow = async () => {
+    if (isSendingMessage) return;
+    setIsSendingMessage(true);
+    try {
+      const payload = await buildComposePayload();
+      localStorage.setItem('uniquemail_active_compose_draft', JSON.stringify(payload));
+      (window as any).uniqueMailNative?.persistRendererStorage?.();
+      const result = await (window as any).uniqueMailNative?.detachCompose?.(payload);
+      if (!result?.ok) throw new Error(result?.error || 'Das Verfassenfenster konnte nicht abgekoppelt werden.');
+      composeInitializedRef.current = false;
+      setActiveRecipientField(null);
+      setIsWritingEmail(false);
+    } catch (error: any) {
+      alert(`Abkoppeln fehlgeschlagen:\n\n${error?.message || error}`);
+    } finally {
+      setIsSendingMessage(false);
+    }
+  };
+
   // Command executor for document design mode (Rich Text capabilities)
   const applyStyle = (command: string, value: string = '') => {
     document.execCommand(command, false, value);
@@ -1089,12 +1108,17 @@ a{color:#0078d4;cursor:pointer}
         {/* Editor Ribbon Quick Action Menu */}
         <div className="bg-slate-50 dark:bg-[#0b0f19] border-b border-slate-200 dark:border-[#1e293b] px-5 py-3 flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 w-full shrink-0">
           <span className="tracking-wide text-[10.5px] uppercase">E-Mail verfassen (Classic Rich-Text)</span>
-          <button 
-            onClick={requestCloseCompose}
-            className="text-slate-400 hover:text-red-500 dark:text-slate-450 font-mono font-bold text-sm transition-colors cursor-pointer"
-          >
-            x
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={detachComposeWindow} disabled={isSendingMessage} className="inline-flex items-center gap-1.5 border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-[#0078d4] hover:bg-blue-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800" title="E-Mail in eigenem Fenster verfassen">
+              <ExternalLink className="h-3.5 w-3.5" /> Abkoppeln
+            </button>
+            <button
+              onClick={requestCloseCompose}
+              className="text-slate-400 hover:text-red-500 dark:text-slate-450 font-mono font-bold text-sm transition-colors cursor-pointer"
+            >
+              x
+            </button>
+          </div>
         </div>
 
         <div id="compose-scroll-region" className="flex-1 min-h-0 overflow-y-auto overscroll-contain">

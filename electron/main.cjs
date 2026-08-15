@@ -10,6 +10,9 @@ const DEFAULT_UPDATE_FEED_URL = 'https://github.com/rakneznar/Unique-Mail-OpenSo
 let PORT = 0;
 let serverProcess = null;
 let mainWindow = null;
+let detachedComposeWindow = null;
+let detachedComposeState = null;
+let detachedComposeClosingByAction = false;
 const approvedWindowCloses = new WeakSet();
 let uniqueMailDataPaths = null;
 let lastKnownUpdate = null;
@@ -657,6 +660,74 @@ function startServer() {
   });
 }
 
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function forwardDetachedComposeToMain(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return false;
+  mainWindow.webContents.send(channel, payload);
+  focusMainWindow();
+  return true;
+}
+
+async function createDetachedComposeWindow(payload) {
+  detachedComposeState = payload && typeof payload === 'object' ? payload : {};
+  if (detachedComposeWindow && !detachedComposeWindow.isDestroyed()) {
+    detachedComposeWindow.webContents.send('native:detached-compose-replace', detachedComposeState);
+    if (detachedComposeWindow.isMinimized()) detachedComposeWindow.restore();
+    detachedComposeWindow.show();
+    detachedComposeWindow.focus();
+    return detachedComposeWindow;
+  }
+
+  detachedComposeClosingByAction = false;
+  const win = new BrowserWindow({
+    width: 980,
+    height: 820,
+    minWidth: 720,
+    minHeight: 620,
+    backgroundColor: '#f8fafc',
+    icon: path.join(__dirname, 'assets', 'icon.ico'),
+    title: 'Neue E-Mail - Unique Mail',
+    resizable: true,
+    maximizable: true,
+    fullscreenable: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  detachedComposeWindow = win;
+  win.setMenuBarVisibility(false);
+  win.on('close', (event) => {
+    if (detachedComposeClosingByAction || win.webContents.isDestroyed()) return;
+    event.preventDefault();
+    win.webContents.send('native:detached-compose-close-request');
+  });
+  win.on('closed', () => {
+    if (detachedComposeWindow === win) detachedComposeWindow = null;
+    detachedComposeClosingByAction = false;
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url && !url.startsWith(`http://127.0.0.1:${PORT}`)) {
+      event.preventDefault();
+      if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) shell.openExternal(url);
+    }
+  });
+  await win.loadURL(`http://127.0.0.1:${PORT}/?uniqueMailDetachedCompose=1`);
+  return win;
+}
+
 async function createWindow() {
   try {
     await startServer();
@@ -1000,7 +1071,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.48 <span class="unique-version-current">aktuell</span></h3><ul><li>An, CC und BCC vervollstaendigen Empfaenger bereits ab dem ersten Zeichen anhand von Anzeigename oder E-Mail-Adresse.</li><li>Adressbuch, lokale Mailkontakte und haeufig verwendete Empfaenger werden zusammengefuehrt und nach Relevanz sortiert.</li><li>Verwendete Empfaenger werden dauerhaft lokal gespeichert und mit dem Einstellungs-Export uebertragen.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.49 <span class="unique-version-current">aktuell</span></h3><ul><li>Das Verfassenfenster kann als eigenstaendiges, frei verschiebbares Electron-Fenster abgekoppelt werden.</li><li>Entwurf, Rich-Text, Empfaenger, Absenderkonto und Anhaenge werden beim Abkoppeln und Andocken verlustfrei uebergeben.</li><li>Senden aus dem Nebenfenster nutzt den normalen Hintergrund-Postausgang; Schliessen per Windows-X dockt den aktuellen Entwurf sicher wieder an.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.48</h3><ul><li>An, CC und BCC vervollstaendigen Empfaenger bereits ab dem ersten Zeichen anhand von Anzeigename oder E-Mail-Adresse.</li><li>Adressbuch, lokale Mailkontakte und haeufig verwendete Empfaenger werden zusammengefuehrt und nach Relevanz sortiert.</li><li>Verwendete Empfaenger werden dauerhaft lokal gespeichert und mit dem Einstellungs-Export uebertragen.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.47</h3><ul><li>Nach kurzem Verweilen auf einem Anhang erscheint automatisch die interne Vorschau.</li><li>Ein Doppelklick oeffnet den Anhang mit der unter Windows hinterlegten Standard-App.</li><li>Das Rechtsklickmenue bietet sowohl die interne Vorschau als auch das Oeffnen mit der Standard-App an.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.46</h3><ul><li>Anhaenge lassen sich einzeln, mit Strg oder Shift als Bereich sowie mit Strg+A vollstaendig auswaehlen.</li><li>Die markierte Anlagenauswahl kann gemeinsam gespeichert werden; die Vorschau bleibt per Doppelklick erreichbar.</li><li>In Gesendet und Postausgang zeigt die Nachrichtenliste die Empfaengeradresse statt der eigenen Absenderadresse.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.45</h3><ul><li>Vollstaendige Nachrichtentexte und Anhaenge werden dauerhaft als einzelne Dateien im stabilen lokalen MailStore gespeichert, getrennt vom temporaeren Cache.</li><li>Nach App-Start und jeder Synchronisierung laedt ein deduplizierter Hintergrundprozess fehlende Inhalte aus allen IMAP-Ordnern schrittweise vor.</li><li>Beim Oeffnen wird zuerst nur die einzelne lokale MailStore-Datei gelesen; langsames Parsen und Neuschreiben einer riesigen Konto-JSON entfaellt.</li><li>Bereits geladene Altinhalte werden automatisch migriert und Verbindungsabbrueche des IMAP-Providers koennen den lokalen Server nicht mehr beenden.</li></ul></article>',
@@ -1139,7 +1211,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.48',
+        '0.4.49',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');
@@ -1371,6 +1443,41 @@ ipcMain.handle('native:import-account-passwords', async (_event, payload) => {
     return { ok: false, error: message };
   }
 });
+ipcMain.handle('native:detach-compose', async (_event, payload) => {
+  try {
+    await createDetachedComposeWindow(payload);
+    return { ok: true };
+  } catch (error) {
+    log(`detached compose open failed: ${error.message || String(error)}`);
+    return { ok: false, error: error.message || String(error) };
+  }
+});
+
+ipcMain.handle('native:get-detached-compose-state', async () => ({ ok: true, payload: detachedComposeState || {} }));
+
+ipcMain.handle('native:update-detached-compose-state', async (_event, payload) => {
+  detachedComposeState = payload && typeof payload === 'object' ? payload : detachedComposeState;
+  return { ok: true };
+});
+
+ipcMain.handle('native:dock-detached-compose', async (_event, payload) => {
+  detachedComposeState = payload && typeof payload === 'object' ? payload : detachedComposeState;
+  const forwarded = forwardDetachedComposeToMain('native:detached-compose-dock', detachedComposeState);
+  detachedComposeClosingByAction = true;
+  if (detachedComposeWindow && !detachedComposeWindow.isDestroyed()) detachedComposeWindow.close();
+  return forwarded ? { ok: true } : { ok: false, error: 'Das Hauptfenster ist nicht verfügbar.' };
+});
+
+ipcMain.handle('native:send-detached-compose', async (_event, payload) => {
+  detachedComposeState = payload && typeof payload === 'object' ? payload : detachedComposeState;
+  const forwarded = forwardDetachedComposeToMain('native:detached-compose-send', detachedComposeState);
+  if (!forwarded) return { ok: false, error: 'Das Hauptfenster ist nicht verfügbar.' };
+  detachedComposeClosingByAction = true;
+  if (detachedComposeWindow && !detachedComposeWindow.isDestroyed()) detachedComposeWindow.close();
+  detachedComposeState = null;
+  return { ok: true };
+});
+
 ipcMain.handle('native:update-check', async () => {
   try {
     return await checkForUniqueMailUpdate();

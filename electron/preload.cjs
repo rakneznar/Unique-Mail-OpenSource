@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const isDetachedComposeRenderer = new URLSearchParams(globalThis.location?.search || '').get('uniqueMailDetachedCompose') === '1';
 
 function readLocalStorageSnapshot() {
   const values = {};
@@ -41,7 +42,7 @@ function restoreLocalStorageSnapshot() {
 
 try {
   persistedRendererSnapshot = ipcRenderer.sendSync('native:renderer-storage-load') || persistedRendererSnapshot;
-  restoreLocalStorageSnapshot();
+  if (!isDetachedComposeRenderer) restoreLocalStorageSnapshot();
 } catch {
   // A missing or unreadable snapshot must never prevent the renderer from starting.
 }
@@ -81,6 +82,35 @@ contextBridge.exposeInMainWorld('uniqueMailNative', {
   deleteAccountPassword: (email) => ipcRenderer.invoke('native:delete-account-password', email),
   exportAccountPasswords: (payload) => ipcRenderer.invoke('native:export-account-passwords', payload),
   importAccountPasswords: (payload) => ipcRenderer.invoke('native:import-account-passwords', payload),
+  detachCompose: (payload) => ipcRenderer.invoke('native:detach-compose', payload),
+  getDetachedComposeState: () => ipcRenderer.invoke('native:get-detached-compose-state'),
+  updateDetachedComposeState: (payload) => ipcRenderer.invoke('native:update-detached-compose-state', payload),
+  dockDetachedCompose: (payload) => ipcRenderer.invoke('native:dock-detached-compose', payload),
+  sendDetachedCompose: (payload) => ipcRenderer.invoke('native:send-detached-compose', payload),
+  onDetachedComposeReplace: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('native:detached-compose-replace', listener);
+    return () => ipcRenderer.removeListener('native:detached-compose-replace', listener);
+  },
+  onDetachedComposeCloseRequest: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = () => callback();
+    ipcRenderer.on('native:detached-compose-close-request', listener);
+    return () => ipcRenderer.removeListener('native:detached-compose-close-request', listener);
+  },
+  onDetachedComposeDock: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('native:detached-compose-dock', listener);
+    return () => ipcRenderer.removeListener('native:detached-compose-dock', listener);
+  },
+  onDetachedComposeSend: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('native:detached-compose-send', listener);
+    return () => ipcRenderer.removeListener('native:detached-compose-send', listener);
+  },
   restoreRendererStorage: () => restoreLocalStorageSnapshot(),
   persistRendererStorage: () => persistLocalStorageSnapshot(),
   checkForUpdate: () => ipcRenderer.invoke('native:update-check'),

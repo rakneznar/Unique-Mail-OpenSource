@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, 
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.48';
+const APP_VERSION = '0.4.49';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -2251,6 +2251,22 @@ Julia`,
     return { active, draftMail };
   };
 
+  const dockComposePayload = (message: ComposeMailPayload) => {
+    const draft = createDraftMail(message);
+    if (!draft) return;
+    localStorage.setItem('uniquemail_active_compose_draft', JSON.stringify(message));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+    setEmails(prev => prev.some(mail => mail.id === draft.draftMail.id)
+      ? prev.map(mail => mail.id === draft.draftMail.id ? draft.draftMail : mail)
+      : [draft.draftMail, ...prev]
+    );
+    setSelectedEmailId(draft.draftMail.id);
+    setComposeMode('draft');
+    setCurrentPage('mail');
+    setIsWritingEmail(true);
+    setSyncStatusText('Abgekoppelter Entwurf wurde wieder angedockt.');
+  };
+
   const handleAutoSaveDraft = (message: ComposeMailPayload) => {
     const draft = createDraftMail(message);
     if (!draft) return;
@@ -2494,6 +2510,27 @@ Julia`,
       }
     });
   };
+
+  useEffect(() => {
+    const nativeApi = (window as any).uniqueMailNative;
+    const unsubscribeDock = nativeApi?.onDetachedComposeDock?.((message: ComposeMailPayload) => {
+      if (message && typeof message === 'object') dockComposePayload(message);
+    });
+    const unsubscribeSend = nativeApi?.onDetachedComposeSend?.((message: ComposeMailPayload) => {
+      if (!message || typeof message !== 'object') return;
+      localStorage.removeItem('uniquemail_active_compose_draft');
+      nativeApi?.persistRendererStorage?.();
+      void handleSendEmail(message).catch((error: any) => {
+        setSyncStatusText(`Versand aus dem abgekoppelten Fenster fehlgeschlagen: ${error?.message || error}`);
+        dockComposePayload(message);
+      });
+    });
+    return () => {
+      unsubscribeDock?.();
+      unsubscribeSend?.();
+    };
+  }, [accounts, emails, activeAccountEmail]);
+
   const handleRetryOutboxEmail = async (id: string) => {
     const mail = emails.find(item => item.id === id);
     if (!mail) return;
