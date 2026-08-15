@@ -548,6 +548,7 @@ a{color:#0078d4;cursor:pointer}
   const [attachmentDragError, setAttachmentDragError] = React.useState('');
   const [selectedAttachmentIndexes, setSelectedAttachmentIndexes] = React.useState<number[]>([]);
   const attachmentSelectionAnchorRef = React.useRef<number | null>(null);
+  const attachmentHoverPreviewTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const autoSaveGenerationRef = React.useRef(0);
   const composeInitializedRef = React.useRef(false);
@@ -564,7 +565,13 @@ a{color:#0078d4;cursor:pointer}
   React.useEffect(() => {
     setSelectedAttachmentIndexes([]);
     attachmentSelectionAnchorRef.current = null;
+    if (attachmentHoverPreviewTimerRef.current) clearTimeout(attachmentHoverPreviewTimerRef.current);
+    attachmentHoverPreviewTimerRef.current = null;
   }, [activeEmail?.id]);
+
+  React.useEffect(() => () => {
+    if (attachmentHoverPreviewTimerRef.current) clearTimeout(attachmentHoverPreviewTimerRef.current);
+  }, []);
 
   const fileToAttachmentPayload = (file: File) => new Promise<ComposeAttachmentPayload>((resolve, reject) => {
     const reader = new FileReader();
@@ -736,6 +743,32 @@ a{color:#0078d4;cursor:pointer}
       size: attachment.size,
       url: base64ToBlobUrl(attachment.contentBase64, contentType),
     });
+  };
+
+  const cancelAttachmentHoverPreview = () => {
+    if (attachmentHoverPreviewTimerRef.current) clearTimeout(attachmentHoverPreviewTimerRef.current);
+    attachmentHoverPreviewTimerRef.current = null;
+  };
+
+  const scheduleAttachmentHoverPreview = (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
+    cancelAttachmentHoverPreview();
+    if (!attachment.contentBase64) return;
+    attachmentHoverPreviewTimerRef.current = setTimeout(() => {
+      attachmentHoverPreviewTimerRef.current = null;
+      openPayloadPreview(attachment);
+    }, 1800);
+  };
+
+  const openAttachmentInDefaultApp = async (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
+    cancelAttachmentHoverPreview();
+    if (!attachment.contentBase64) {
+      alert('Diese Anlage ist noch nicht vollstaendig lokal geladen. Bitte Nachricht aktualisieren und erneut versuchen.');
+      return;
+    }
+    const nativeApi = (window as any).uniqueMailNative;
+    const token = preparedAttachmentDrags[attachmentDragKey(attachment)];
+    const result = await nativeApi?.openAttachment?.(token ? { token } : { attachment });
+    if (!result?.ok) alert(result?.error || 'Die Anlage konnte nicht mit der Windows-Standard-App geoeffnet werden.');
   };
 
   const addComposeFiles = (fileList: FileList | File[]) => {
@@ -1573,14 +1606,15 @@ a{color:#0078d4;cursor:pointer}
                   role="option"
                   aria-selected={selectedAttachmentIndexes.includes(index)}
                   onClick={(event) => selectAttachment(index, event)}
-                  onDoubleClick={() => openPayloadPreview(attachment)}
+                  onDoubleClick={() => void openAttachmentInDefaultApp(attachment)}
                   draggable={!!attachment.contentBase64}
-                  onMouseEnter={() => void prepareAttachmentDragOut(attachment)}
+                  onMouseEnter={() => { void prepareAttachmentDragOut(attachment); scheduleAttachmentHoverPreview(attachment); }}
+                  onMouseLeave={cancelAttachmentHoverPreview}
                   onFocus={() => void prepareAttachmentDragOut(attachment)}
-                  onDragStart={(event) => startAttachmentDragOut(event, attachment)}
+                  onDragStart={(event) => { cancelAttachmentHoverPreview(); startAttachmentDragOut(event, attachment); }}
                   onContextMenu={(event) => { event.preventDefault(); setAttachmentContextMenu({ x: event.clientX, y: event.clientY, attachment }); }}
                   className={`${selectedAttachmentIndexes.includes(index) ? 'bg-blue-50 border-[#0078d4] ring-1 ring-[#0078d4]/30' : 'bg-white border-slate-200 hover:bg-slate-50'} border px-2.5 py-1 rounded-md text-[10.5px] cursor-pointer font-bold flex items-center gap-1.5 text-[#0078d4] transition-all hover:shadow-xs max-w-[300px]`}
-                  title={attachment.contentBase64 ? (preparedAttachmentDrags[attachmentDragKey(attachment)] ? 'Klicken zum Auswaehlen, Strg/Shift fuer Mehrfachauswahl, Doppelklick fuer Vorschau' : 'Drag-and-drop wird vorbereitet...') : 'Anlage nachladen, dann Vorschau oeffnen'}
+                  title={attachment.contentBase64 ? (preparedAttachmentDrags[attachmentDragKey(attachment)] ? 'Kurz verweilen fuer Vorschau; Doppelklick oeffnet die Standard-App' : 'Drag-and-drop und Standard-App werden vorbereitet...') : 'Anlage nachladen, dann Vorschau oeffnen'}
                 >
                   <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selectedAttachmentIndexes.includes(index) ? 'border-[#0078d4] bg-[#0078d4] text-white' : 'border-slate-300 bg-white text-transparent'}`}>
                     <Check className="h-3 w-3" />
@@ -1611,6 +1645,13 @@ a{color:#0078d4;cursor:pointer}
                 className="w-full text-left px-3 py-2 hover:bg-slate-50"
               >
                 Vorschau öffnen
+              </button>
+              <button
+                type="button"
+                onClick={() => { void openAttachmentInDefaultApp(attachmentContextMenu.attachment); setAttachmentContextMenu(null); }}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50"
+              >
+                Mit Standard-App öffnen
               </button>
               <button
                 type="button"
