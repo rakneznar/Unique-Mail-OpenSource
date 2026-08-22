@@ -10,6 +10,7 @@ import {
   Pin, Star, Trash2, Plus, X
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, Category } from '../types';
+import { addEmailsToDragData } from '../utils/eml';
 
 interface ItemListProps {
   currentPage: 'mail' | 'calendar' | 'contacts' | 'crm' | 'tasks' | 'notes' | 'dev';
@@ -466,9 +467,13 @@ export default function ItemList({
                 draggable
                 onDragStart={(e) => {
                   const ids = selectedEmailIds.includes(email.id) ? selectedEmailIds : [email.id];
-                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.effectAllowed = 'copyMove';
                   e.dataTransfer.setData('application/x-unique-mail-ids', JSON.stringify(ids));
                   e.dataTransfer.setData('text/plain', ids.join(','));
+                  addEmailsToDragData(
+                    e.dataTransfer,
+                    ids.map(id => emails.find(item => item.id === id)).filter((item): item is Email => Boolean(item))
+                  );
                 }}
                 onClick={(e) => {
                   listKeyboardRef.current?.focus();

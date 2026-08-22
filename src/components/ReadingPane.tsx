@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, CalendarItemDraft, KnownRecipient } from '../types';
 import { useComposePastePrompt } from './ComposePastePrompt';
+import { readEmlAttachmentsFromDrop } from '../utils/eml';
 
 export interface ComposeAttachmentPayload {
   filename: string;
@@ -809,6 +810,15 @@ a{color:#0078d4;cursor:pointer}
     });
   };
 
+  const addComposeDrop = (dataTransfer: DataTransfer) => {
+    const messageAttachments = readEmlAttachmentsFromDrop(dataTransfer);
+    if (messageAttachments.length > 0) {
+      setStoredAttachmentPayloads(previous => [...previous, ...messageAttachments]);
+      return;
+    }
+    if (dataTransfer.files?.length) addComposeFiles(dataTransfer.files);
+  };
+
   type RecipientCandidate = { email: string; displayName: string; useCount: number; lastUsedAt: string };
   const recipientCandidates = React.useMemo<RecipientCandidate[]>(() => {
     const ownAddresses = new Set(accountOptions.map(account => String(account.email || '').trim().toLowerCase()).filter(Boolean));
@@ -1371,9 +1381,7 @@ a{color:#0078d4;cursor:pointer}
             }}
             onDrop={(e) => {
               e.preventDefault();
-              if (e.dataTransfer.files?.length) {
-                addComposeFiles(e.dataTransfer.files);
-              }
+              addComposeDrop(e.dataTransfer);
             }}
             onInput={() => {
               if (editorRef.current) {
@@ -1385,7 +1393,17 @@ a{color:#0078d4;cursor:pointer}
             placeholder="Geben Sie Ihren E-Mail Nachrichtentext ein..."
           />
 
-          <div className="border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-[#0b0f19]/70 rounded-xl p-3 text-[11px] text-slate-500 dark:text-slate-350">
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'copy';
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              addComposeDrop(event.dataTransfer);
+            }}
+            className="border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-[#0b0f19]/70 rounded-xl p-3 text-[11px] text-slate-500 dark:text-slate-350"
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -1399,7 +1417,7 @@ a{color:#0078d4;cursor:pointer}
               }}
             />
             <div className="flex items-center justify-between gap-3">
-              <span className="font-semibold">Anlagen hier ablegen oder Datei auswählen</span>
+              <span className="font-semibold">Dateien oder E-Mails hier ablegen</span>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -1412,6 +1430,7 @@ a{color:#0078d4;cursor:pointer}
               <div className="flex flex-wrap gap-2 mt-2">
                 {storedAttachmentPayloads.map((file) => (
                   <span key={`stored-${file.filename}-${file.contentBase64.length}`} className="inline-flex items-center gap-1.5 bg-white dark:bg-[#1e293b] border border-slate-200 dark:border-slate-700 px-2.5 py-1 rounded-lg text-[10.5px] font-semibold text-slate-700 dark:text-slate-200">
+                    {file.contentType === 'message/rfc822' && <Mail className="h-3.5 w-3.5 shrink-0 text-[#0078d4]" />}
                     <span title="Gespeicherte Anlage">{file.filename}</span>
                     <button
                       type="button"
@@ -1424,6 +1443,7 @@ a{color:#0078d4;cursor:pointer}
                 ))}
                 {composeAttachments.map((file) => (
                   <span key={`${file.name}-${file.size}-${file.lastModified}`} className="inline-flex items-center gap-1.5 bg-white dark:bg-[#1e293b] border border-slate-200 dark:border-slate-700 px-2.5 py-1 rounded-lg text-[10.5px] font-semibold text-slate-700 dark:text-slate-200">
+                    {(file.type === 'message/rfc822' || file.name.toLowerCase().endsWith('.eml')) && <Mail className="h-3.5 w-3.5 shrink-0 text-[#0078d4]" />}
                     <button
                       type="button"
                       onClick={() => openFilePreview(file)}
