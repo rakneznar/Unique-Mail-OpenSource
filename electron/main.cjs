@@ -1071,7 +1071,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.49 <span class="unique-version-current">aktuell</span></h3><ul><li>Das Verfassenfenster kann als eigenstaendiges, frei verschiebbares Electron-Fenster abgekoppelt werden.</li><li>Entwurf, Rich-Text, Empfaenger, Absenderkonto und Anhaenge werden beim Abkoppeln und Andocken verlustfrei uebergeben.</li><li>Senden aus dem Nebenfenster nutzt den normalen Hintergrund-Postausgang; Schliessen per Windows-X dockt den aktuellen Entwurf sicher wieder an.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.50 <span class="unique-version-current">aktuell</span></h3><ul><li>Beim Einfuegen formatierter Zwischenablage-Inhalte kann zwischen Originalformatierung und reinem Text gewaehlt werden.</li><li>Schriftarten, Farben, Links, Listen und Absatzformatierungen aus Browsern und Office-Dokumenten werden zuverlaessiger uebernommen.</li><li>Die Einfuegeauswahl funktioniert im angedockten und abgekoppelten Verfassenfenster; unsichere aktive HTML-Inhalte werden entfernt.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.49</h3><ul><li>Das Verfassenfenster kann als eigenstaendiges, frei verschiebbares Electron-Fenster abgekoppelt werden.</li><li>Entwurf, Rich-Text, Empfaenger, Absenderkonto und Anhaenge werden beim Abkoppeln und Andocken verlustfrei uebergeben.</li><li>Senden aus dem Nebenfenster nutzt den normalen Hintergrund-Postausgang; Schliessen per Windows-X dockt den aktuellen Entwurf sicher wieder an.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.48</h3><ul><li>An, CC und BCC vervollstaendigen Empfaenger bereits ab dem ersten Zeichen anhand von Anzeigename oder E-Mail-Adresse.</li><li>Adressbuch, lokale Mailkontakte und haeufig verwendete Empfaenger werden zusammengefuehrt und nach Relevanz sortiert.</li><li>Verwendete Empfaenger werden dauerhaft lokal gespeichert und mit dem Einstellungs-Export uebertragen.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.47</h3><ul><li>Nach kurzem Verweilen auf einem Anhang erscheint automatisch die interne Vorschau.</li><li>Ein Doppelklick oeffnet den Anhang mit der unter Windows hinterlegten Standard-App.</li><li>Das Rechtsklickmenue bietet sowohl die interne Vorschau als auch das Oeffnen mit der Standard-App an.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.46</h3><ul><li>Anhaenge lassen sich einzeln, mit Strg oder Shift als Bereich sowie mit Strg+A vollstaendig auswaehlen.</li><li>Die markierte Anlagenauswahl kann gemeinsam gespeichert werden; die Vorschau bleibt per Doppelklick erreichbar.</li><li>In Gesendet und Postausgang zeigt die Nachrichtenliste die Empfaengeradresse statt der eigenen Absenderadresse.</li></ul></article>',
@@ -1211,7 +1212,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.49',
+        '0.4.50',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');

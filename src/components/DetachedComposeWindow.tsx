@@ -1,6 +1,7 @@
 import React from 'react';
 import { Bold, Italic, Underline, List, ListOrdered, Paperclip, Send, PanelTopClose, Trash2 } from 'lucide-react';
 import type { ComposeMailPayload } from './ReadingPane';
+import { useComposePastePrompt } from './ComposePastePrompt';
 
 type Account = { email: string; displayName?: string; senderName?: string; name?: string };
 type StoredContact = { email?: string; firstName?: string; lastName?: string };
@@ -32,6 +33,10 @@ export default function DetachedComposeWindow() {
   const editorRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const payloadRef = React.useRef(payload);
+  const { handlePaste, pastePrompt } = useComposePastePrompt(
+    editorRef,
+    React.useCallback((html: string) => setPayload(previous => ({ ...previous, body: html })), [])
+  );
   const nativeApi = (window as any).uniqueMailNative;
   const accounts = readJson<Account[]>('outlook_accounts', []);
   const contacts = readJson<StoredContact[]>('outlook_contacts', []);
@@ -134,6 +139,7 @@ export default function DetachedComposeWindow() {
 
   return (
     <div className="flex h-screen min-h-0 flex-col bg-white text-slate-800 dark:bg-[#0f172a] dark:text-slate-100">
+      {pastePrompt}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-slate-50 px-4 dark:border-slate-700 dark:bg-[#111827]">
         <div>
           <h1 className="text-sm font-extrabold">Neue E-Mail</h1>
@@ -170,7 +176,7 @@ export default function DetachedComposeWindow() {
         <button type="button" onClick={() => applyFormat('insertOrderedList')} title="Nummerierung" className="h-8 w-8 border border-slate-200 bg-white hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800"><ListOrdered className="m-auto h-4 w-4" /></button>
       </div>
 
-      <div ref={editorRef} contentEditable suppressContentEditableWarning onInput={event => update('body', event.currentTarget.innerHTML)} className="min-h-0 flex-1 overflow-y-auto p-5 text-sm leading-6 outline-none" />
+      <div ref={editorRef} contentEditable suppressContentEditableWarning onPaste={handlePaste} onInput={event => update('body', event.currentTarget.innerHTML)} className="min-h-0 flex-1 overflow-y-auto p-5 text-sm leading-6 outline-none" />
 
       <div onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={event => { event.preventDefault(); void addFiles(event.dataTransfer.files); }} className="mx-4 mb-3 shrink-0 border border-dashed border-slate-300 p-2 dark:border-slate-600">
         <div className="flex items-center justify-between gap-3">

@@ -10,6 +10,7 @@ import {
   Clock, CheckSquare, Code, Check, Send, Copy, FileText, FileSpreadsheet, FileArchive, FileImage, ShieldAlert, Signature, ExternalLink
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, CalendarItemDraft, KnownRecipient } from '../types';
+import { useComposePastePrompt } from './ComposePastePrompt';
 
 export interface ComposeAttachmentPayload {
   filename: string;
@@ -544,6 +545,10 @@ a{color:#0078d4;cursor:pointer}
 
   const editorRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const { handlePaste: handleComposePaste, pastePrompt: composePastePrompt } = useComposePastePrompt(
+    editorRef,
+    React.useCallback((html: string) => setBodyInput(html), [])
+  );
   const [composeAttachments, setComposeAttachments] = React.useState<File[]>([]);
   const [storedAttachmentPayloads, setStoredAttachmentPayloads] = React.useState<ComposeAttachmentPayload[]>([]);
   const [previewAttachment, setPreviewAttachment] = React.useState<{ name: string; type: string; size?: number; url: string } | null>(null);
@@ -1105,6 +1110,7 @@ a{color:#0078d4;cursor:pointer}
   if (isWritingEmail && currentPage === 'mail') {
     return (
       <div id="new-email-writer" className="flex-1 min-h-0 bg-white dark:bg-[#0f172a] flex flex-col h-full font-sans border-t md:border-t-0 select-none overflow-hidden">
+        {composePastePrompt}
         {/* Editor Ribbon Quick Action Menu */}
         <div className="bg-slate-50 dark:bg-[#0b0f19] border-b border-slate-200 dark:border-[#1e293b] px-5 py-3 flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 w-full shrink-0">
           <span className="tracking-wide text-[10.5px] uppercase">E-Mail verfassen (Classic Rich-Text)</span>
@@ -1339,6 +1345,7 @@ a{color:#0078d4;cursor:pointer}
           <div 
             ref={editorRef}
             contentEditable
+            onPaste={handleComposePaste}
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'copy';
