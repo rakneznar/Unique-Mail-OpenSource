@@ -10,7 +10,7 @@ import {
   Mail, MailOpen, Trash2, Archive, Reply, ReplyAll, Forward, Search, 
   RefreshCw, Wifi, WifiOff, FolderPlus, FolderOpen, 
   Plus, Settings, Layers, Milestone, Code, Cpu, ShieldAlert, Tag, Flag, Users, Undo2, Globe,
-  Sun, Moon, Zap, Pin, Star
+  Sun, Moon, Zap, Pin, Star, Repeat2
 } from 'lucide-react';
 
 interface RibbonProps {
@@ -53,8 +53,8 @@ interface RibbonProps {
   onApplyQuickStep?: (qs: any) => void;
   onReplyAll?: () => void;
   onForward?: () => void;
-  onNewCalendarItem?: () => void;
-  onNewContact?: () => void;
+  onResend?: () => void;
+  canResendSelected?: boolean;
   categoriesList?: Category[];
   onManageCategories?: () => void;
   onDeleteCategoryGlobal?: (name: string) => void;
@@ -100,8 +100,8 @@ export default function Ribbon({
   onApplyQuickStep,
   onReplyAll,
   onForward,
-  onNewCalendarItem,
-  onNewContact,
+  onResend,
+  canResendSelected = false,
   categoriesList,
   onManageCategories,
   onDeleteCategoryGlobal,
@@ -122,8 +122,7 @@ export default function Ribbon({
     folders: language === 'en' ? 'Folders' : 'Ordner',
     view: language === 'en' ? 'View' : 'Ansicht',
     newEmail: language === 'en' ? 'New E-Mail' : 'Neue E-Mail',
-    newAppointment: language === 'en' ? 'New appointment' : 'Termin anlegen',
-    newContact: language === 'en' ? 'New contact' : 'Neuer Kontakt',
+    resend: language === 'en' ? 'Resend' : 'Erneut senden',
     newGroup: language === 'en' ? 'New' : 'Neu',
     pin: language === 'en' ? 'Pin' : 'Anpinnen',
     readUnread: language === 'en' ? 'Read/Unread' : 'Gelesen/Ungelesen',
@@ -327,24 +326,19 @@ export default function Ribbon({
                   <Plus className="w-5.5 h-5.5 text-[#0078d4] self-center mb-0.5" />
                   <span className="text-[11px] leading-none text-center text-slate-900 font-extrabold">{ribbonText.newEmail}</span>
                 </button>
-                <div className="flex flex-col space-y-1">
-                  <button 
-                    onClick={() => { setCurrentPage('calendar'); }}
-                    className="flex items-center hover:bg-slate-100 px-2 py-1 rounded-lg text-left text-[11px] text-slate-700 font-semibold cursor-pointer border border-transparent hover:border-slate-100"
-                    title="Neuen Kalendereintrag hinzufügen"
-                  >
-                    <span className="w-1.5 h-1.5 bg-[#107c41] rounded-full mr-1.5"></span>
-                    Termin anlegen
-                  </button>
-                  <button 
-                    onClick={() => { setCurrentPage('crm'); }}
-                    className="flex items-center hover:bg-slate-100 px-2 py-1 rounded-lg text-left text-[11px] text-slate-700 font-semibold cursor-pointer border border-transparent hover:border-slate-100"
-                    title="Neuen Kontakt speichern"
-                  >
-                    <span className="w-1.5 h-1.5 bg-[#0078d4] rounded-full mr-1.5"></span>
-                    Neuer Kontakt
-                  </button>
-                </div>
+                <button
+                  onClick={onResend}
+                  disabled={!canResendSelected || currentPage !== 'mail'}
+                  className={`flex h-14 w-24 flex-col items-center justify-center border border-transparent p-1 text-center transition-all ${
+                    canResendSelected && currentPage === 'mail'
+                      ? 'cursor-pointer text-[#005a9e] hover:border-blue-100 hover:bg-blue-50 hover:shadow-xs active:scale-95'
+                      : 'cursor-not-allowed text-slate-400 opacity-35'
+                  }`}
+                  title={canResendSelected ? 'Gesendete Nachricht als vollständige Kopie öffnen' : 'Bitte eine gesendete Nachricht auswählen'}
+                >
+                  <Repeat2 className="mb-0.5 h-5 w-5" />
+                  <span className="text-[10px] font-bold leading-3">{ribbonText.resend}</span>
+                </button>
               </div>
               <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">{ribbonText.newGroup}</div>
             </div>

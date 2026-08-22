@@ -41,6 +41,7 @@ interface ItemListProps {
   onReplyMail?: () => void;
   onReplyAll?: () => void;
   onForwardMail?: () => void;
+  onResendEmail?: (id: string) => void;
   onDeleteMail?: () => void;
   onArchiveMail?: () => void;
   onReportPhishing?: () => void;
@@ -85,6 +86,7 @@ export default function ItemList({
   onReplyMail,
   onReplyAll,
   onForwardMail,
+  onResendEmail,
   onDeleteMail,
   onArchiveMail,
   onReportPhishing,
@@ -515,6 +517,9 @@ export default function ItemList({
                   <div className="flex items-center space-x-1.5 shrink-0">
                     {email.hasAttachment && (
                       <Paperclip className="w-3.5 h-3.5 text-slate-500 dark:text-slate-300 shrink-0" title="Anhang enthalten" />
+                    )}
+                    {email.isFavorite && (
+                      <Star className="w-3.5 h-3.5 shrink-0 fill-yellow-400 text-yellow-500" title="Favorit" aria-label="Favorit" />
                     )}
                     <span className="text-[9px] text-slate-400 font-mono font-semibold text-right min-w-[74px]">
                       {formatDate(email.date)}
@@ -965,6 +970,23 @@ export default function ItemList({
             <span className="text-teal-500">→</span>
             <span>Weiterleiten</span>
           </button>
+          {(() => {
+            const contextEmail = emails.find(email => email.id === contextMenu.emailId);
+            const folder = String(contextEmail?.imapFolder || contextEmail?.folder || '').toLowerCase();
+            const isSentMessage = contextEmail?.sendStatus === 'sent'
+              || contextEmail?.category?.toLowerCase() === 'gesendet'
+              || /(^|[\\/._ -])(sent|gesendet|sent items|gesendete elemente)([\\/._ -]|$)/i.test(folder);
+            return isSentMessage ? (
+              <button
+                id="ctx-resend"
+                onClick={() => { onResendEmail?.(contextMenu.emailId); setContextMenu(null); }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-blue-50 text-[#005a9e] font-bold flex items-center space-x-1.5 transition-all cursor-pointer text-[11px]"
+              >
+                <span className="text-[#0078d4]">↻</span>
+                <span>Erneut senden</span>
+              </button>
+            ) : null;
+          })()}
           
           <div className="h-px bg-slate-100 my-1"></div>
 

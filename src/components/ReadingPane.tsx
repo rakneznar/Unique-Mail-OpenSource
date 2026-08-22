@@ -29,7 +29,7 @@ export interface ComposeMailPayload {
   sourceId?: string;
 }
 
-export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward' | 'draft' | 'outbox';
+export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward' | 'resend' | 'draft' | 'outbox';
 
 interface ReadingPaneProps {
   currentPage: 'mail' | 'calendar' | 'contacts' | 'crm' | 'tasks' | 'notes' | 'dev';
@@ -942,7 +942,26 @@ a{color:#0078d4;cursor:pointer}
       const signatureHtml = signatureActive && signatureText ? buildSignatureHtml(signatureText) : '';
       setComposeSignatureChoice(signatureHtml ? 'account' : 'none');
 
-      if (activeEmail && (composeMode === 'draft' || composeMode === 'outbox')) {
+      setComposeAccountEmail(activeEmail?.accountEmail || defaultComposeAccountEmail);
+
+      if (activeEmail && composeMode === 'resend') {
+        setComposeDraftId(`draft-${Date.now()}`);
+        setToInput(activeEmail.recipientEmail || '');
+        setCcInput(activeEmail.ccEmail || '');
+        setBccInput(activeEmail.bccEmail || '');
+        setShowCcBcc(!!(activeEmail.ccEmail || activeEmail.bccEmail));
+        setSubjectInput(activeEmail.subject || '');
+        const resendAttachments = activeEmail.draftAttachments || (activeEmail.attachments || [])
+          .filter(attachment => typeof attachment.contentBase64 === 'string')
+          .map(attachment => ({
+            filename: attachment.filename,
+            contentType: attachment.contentType || 'application/octet-stream',
+            contentBase64: attachment.contentBase64 || ''
+          }));
+        setStoredAttachmentPayloads(resendAttachments);
+        setBodyInput(activeEmail.body || '');
+        if (editorRef.current) editorRef.current.innerHTML = activeEmail.body || '';
+      } else if (activeEmail && (composeMode === 'draft' || composeMode === 'outbox')) {
         setComposeDraftId(activeEmail.id);
         setToInput(activeEmail.recipientEmail || '');
         setCcInput(activeEmail.ccEmail || '');

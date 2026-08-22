@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, 
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.50';
+const APP_VERSION = '0.4.51';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -75,6 +75,14 @@ const hashAppLockPassword = async (password: string, salt: string) => {
 const DEFAULT_CONTACT_SORT_LABELS = ['Newsletter', 'Privat', 'Beruflich'];
 const DEFAULT_MAIL_DATE_FORMAT = 'dd.MM.yyyy';
 const RECIPIENT_HISTORY_STORAGE_KEY = 'uniquemail_recipient_history';
+
+const isSentMessage = (mail?: Email | null) => {
+  if (!mail) return false;
+  const folder = String(mail.imapFolder || mail.folder || '').toLowerCase();
+  return mail.sendStatus === 'sent'
+    || mail.category?.toLowerCase() === 'gesendet'
+    || /(^|[\\/._ -])(sent|gesendet|sent items|gesendete elemente)([\\/._ -]|$)/i.test(folder);
+};
 
 const sanitizeRecipientHistory = (value: unknown): KnownRecipient[] => {
   if (!Array.isArray(value)) return [];
@@ -2828,7 +2836,7 @@ Julia`,
   };
 
   const serverDiskCacheLoadStartedRef = useRef(false);
-  const messageBodyRequestsRef = useRef<Map<string, Promise<void>>>(new Map());
+  const messageBodyRequestsRef = useRef<Map<string, Promise<Email | void>>>(new Map());
   const messagePrefetchTimerRef = useRef<number | null>(null);
   const mailStorePrefetchAccountsRef = useRef<Set<string>>(new Set());
 
@@ -3056,7 +3064,7 @@ Julia`,
     return mail.bodyLoaded !== true && (!mail.body || bodyLooksBroken || attachmentsNeedFullLoad);
   };
 
-  const loadMessageBody = (mail: Email, priority: number, allowPasswordPrompt: boolean, forceRefresh = false): Promise<void> => {
+  const loadMessageBody = (mail: Email, priority: number, allowPasswordPrompt: boolean, forceRefresh = false): Promise<Email | void> => {
     const account = getAccountForMail(mail);
     if (!account || !mail.imapUid || !mail.imapFolder) return Promise.resolve();
     const requestKey = `${account.email.toLowerCase()}|${mail.imapFolder.toLowerCase()}|${mail.imapUid}`;
@@ -3088,6 +3096,7 @@ Julia`,
       const fullEmail = data.email as Email | undefined;
       if (!fullEmail) return;
       setEmails(prev => prev.map(item => item.id === mail.id ? { ...item, ...fullEmail, bodyLoaded: true } : item));
+      return fullEmail;
     };
 
     const request = (priority >= 100
@@ -3103,6 +3112,39 @@ Julia`,
     });
     messageBodyRequestsRef.current.set(requestKey, trackedRequest);
     return trackedRequest;
+  };
+
+  const handleResendEmail = async (emailId = selectedEmailId || '') => {
+    const selectedMail = emails.find(mail => mail.id === emailId);
+    if (!selectedMail || !isSentMessage(selectedMail)) {
+      setSyncStatusText('Erneut senden ist nur für gesendete Nachrichten verfügbar.');
+      return;
+    }
+
+    let sourceMail = selectedMail;
+    const attachmentContentMissing = selectedMail.hasAttachment
+      && (!selectedMail.attachments?.length || selectedMail.attachments.some(attachment => typeof attachment.contentBase64 !== 'string'))
+      && !selectedMail.draftAttachments?.length;
+    if (mailBodyNeedsLoading(selectedMail) || (!!selectedMail.imapUid && attachmentContentMissing)) {
+      setSyncStatusText('Vollständige gesendete Nachricht und Anlagen werden geladen...');
+      const loadedMail = await loadMessageBody(selectedMail, 110, true, attachmentContentMissing);
+      if (loadedMail) sourceMail = { ...selectedMail, ...loadedMail, bodyLoaded: true };
+    }
+
+    const missingAttachments = sourceMail.hasAttachment
+      && (!sourceMail.attachments?.length || sourceMail.attachments.some(attachment => typeof attachment.contentBase64 !== 'string'))
+      && !sourceMail.draftAttachments?.length;
+    if ((!sourceMail.body && sourceMail.imapUid) || missingAttachments) {
+      setSyncStatusText('Die vollständige gesendete Nachricht konnte nicht geladen werden.');
+      alert('Die Nachricht kann erst erneut geöffnet werden, wenn Text und Anlagen vollständig vom Mailserver geladen wurden.');
+      return;
+    }
+
+    setSelectedEmailId(sourceMail.id);
+    setComposeMode('resend');
+    setCurrentPage('mail');
+    setIsWritingEmail(true);
+    setSyncStatusText('Gesendete Nachricht wurde als bearbeitbare 1:1-Kopie geöffnet.');
   };
 
   useEffect(() => {
@@ -3875,6 +3917,8 @@ Julia`,
         onToggleSelectedPin={handleToggleSelectedPin}
         onToggleSelectedReadUnread={handleToggleSelectedReadUnread}
         onToggleSelectedFavorite={handleToggleSelectedFavorite}
+        onResend={() => void handleResendEmail()}
+        canResendSelected={isSentMessage(selectedEmailForActions)}
         selectedEmailIsRead={selectedEmailForActions?.isRead ?? true}
         selectedEmailIsPinned={!!selectedEmailForActions?.isPinned}
         selectedEmailIsFavorite={!!selectedEmailForActions?.isFavorite}
@@ -3897,8 +3941,6 @@ Julia`,
         onApplyQuickStep={handleApplyQuickStep}
         onReplyAll={handleReplyAll}
         onForward={handleForward}
-        onNewCalendarItem={handleNewCalendarItem}
-        onNewContact={handleNewContact}
         categoriesList={categoriesList}
         onManageCategories={() => setShowCategoriesModal(true)}
         onDeleteCategoryGlobal={handleDeleteCategoryGlobal}
@@ -4156,6 +4198,7 @@ Julia`,
               onReplyMail={handleReplyMail}
               onReplyAll={handleReplyAll}
               onForwardMail={handleForward}
+              onResendEmail={(id) => void handleResendEmail(id)}
               onDeleteMail={handleDeleteMail}
               onArchiveMail={handleArchiveMail}
               onReportPhishing={handleReportPhishing}
