@@ -35,6 +35,13 @@ type FolderMoveRequest = SyncInboxRequest & {
   mode: 'nest' | 'merge';
 };
 
+type FolderManageRequest = SyncInboxRequest & {
+  action: 'create' | 'rename' | 'delete';
+  parentFolder?: string;
+  sourceFolder?: string;
+  name?: string;
+};
+
 type SendMailRequest = SyncInboxRequest & {
   smtpServer: string;
   smtpPort: number;
@@ -1177,6 +1184,149 @@ async function startServer() {
       res.json({ ok: true, mode, delimiter, resultingFolder: destinationFolder, movedMessages });
     } catch (error: any) {
       res.status(502).json({ error: error?.message || "Der Ordner konnte nicht auf dem IMAP-Server geändert werden." });
+    } finally {
+      await client.logout().catch(() => undefined);
+    }
+  });
+
+  app.post("/api/mail/folders/manage", async (req, res) => {
+    const { email, password, imapServer, imapPort, action, parentFolder, sourceFolder } = req.body as FolderManageRequest;
+    const name = String((req.body as FolderManageRequest).name || "").trim();
+    if (!email || !password || !imapServer || !imapPort || !["create", "rename", "delete"].includes(action)) {
+      return res.status(400).json({ error: "E-Mail, Passwort, IMAP-Daten und eine gültige Ordneraktion sind erforderlich." });
+    }
+    if (action === "create" && !parentFolder) return res.status(400).json({ error: "Der übergeordnete Ordner fehlt." });
+    if (["rename", "delete"].includes(action) && !sourceFolder) return res.status(400).json({ error: "Der zu ändernde Ordner fehlt." });
+
+    const client = createImapClient({ email, password, imapServer, imapPort });
+    try {
+      await client.connect();
+      const folders = await client.list();
+      const sourceInfo: any = sourceFolder ? folders.find(folder => sameFolder(folder.path, sourceFolder)) : null;
+      const parentInfo: any = parentFolder ? folders.find(folder => sameFolder(folder.path, parentFolder)) : null;
+      if (sourceFolder && !sourceInfo) return res.status(404).json({ error: "Der Ordner ist auf dem IMAP-Server nicht mehr vorhanden." });
+      if (parentFolder && !parentInfo) return res.status(404).json({ error: "Der übergeordnete Ordner ist auf dem IMAP-Server nicht mehr vorhanden." });
+
+      const delimiter = String(sourceInfo?.delimiter || parentInfo?.delimiter || folders.find(folder => folder.delimiter)?.delimiter || "/");
+      const protectedFolderPattern = /^(?:inbox|posteingang|sent|gesendet(?:e elemente)?|drafts?|entw(?:u|ü)rfe|trash|deleted|papierkorb|junk|spam|archive|archiv|outbox|postausgang)$/i;
+      const leafName = (folderPath: string) => folderPath.includes(delimiter)
+        ? folderPath.slice(folderPath.lastIndexOf(delimiter) + delimiter.length)
+        : folderPath;
+      const isProtected = (folderInfo: any, folderPath: string) => !!folderInfo?.specialUse || protectedFolderPattern.test(leafName(folderPath).trim());
+      const validateName = () => {
+        if (!name) throw new Error("Bitte einen Ordnernamen eingeben.");
+        if (name.length > 100) throw new Error("Der Ordnername darf höchstens 100 Zeichen enthalten.");
+        if (/[\u0000-\u001f\u007f]/.test(name) || name.includes(delimiter)) {
+          throw new Error(`Der Ordnername darf keine Steuerzeichen oder das Server-Trennzeichen „${delimiter}“ enthalten.`);
+        }
+      };
+      const cached = await readMailCache(email);
+
+      if (action === "create") {
+        validateName();
+        const resultingFolder = `${parentFolder}${String(parentFolder).endsWith(delimiter) ? "" : delimiter}${name}`;
+        if (folders.some(folder => sameFolder(folder.path, resultingFolder))) {
+          return res.status(409).json({ error: `Unter „${parentFolder}“ existiert bereits ein Ordner namens „${name}“.` });
+        }
+        await client.mailboxCreate(resultingFolder);
+        await client.mailboxSubscribe(resultingFolder).catch(() => undefined);
+        if (cached) {
+          cached.folders = Array.isArray(cached.folders) ? cached.folders : [];
+          cached.folders.push({
+            id: resultingFolder,
+            path: resultingFolder,
+            label: name,
+            delimiter,
+            parentPath: parentFolder,
+            depth: resultingFolder.split(delimiter).length - 1,
+            flags: [],
+            specialUse: null,
+            listed: true,
+            subscribed: true,
+            status: { messages: 0, unseen: 0 }
+          });
+          cached.syncedAt = new Date().toISOString();
+          await writeMailCache(email, cached);
+        }
+        return res.json({ ok: true, action, delimiter, resultingFolder });
+      }
+
+      if (isProtected(sourceInfo, String(sourceFolder))) {
+        return res.status(409).json({ error: "Standard- und Systemordner können nicht umbenannt oder gelöscht werden." });
+      }
+      const sourceKey = String(sourceFolder).toLowerCase();
+      const belongsToSourceTree = (folderPath: string) => {
+        const value = String(folderPath || "").toLowerCase();
+        return value === sourceKey || value.startsWith(sourceKey + delimiter.toLowerCase());
+      };
+
+      if (action === "rename") {
+        validateName();
+        const sourceParent = String(sourceFolder).includes(delimiter)
+          ? String(sourceFolder).slice(0, String(sourceFolder).lastIndexOf(delimiter))
+          : "";
+        const resultingFolder = `${sourceParent}${sourceParent ? delimiter : ""}${name}`;
+        if (sameFolder(resultingFolder, sourceFolder)) return res.json({ ok: true, action, delimiter, resultingFolder });
+        if (folders.some(folder => sameFolder(folder.path, resultingFolder))) {
+          return res.status(409).json({ error: `Auf dieser Ebene existiert bereits ein Ordner namens „${name}“.` });
+        }
+        await client.mailboxRename(String(sourceFolder), resultingFolder);
+        if (sourceInfo?.subscribed) {
+          await client.mailboxUnsubscribe(String(sourceFolder)).catch(() => undefined);
+          await client.mailboxSubscribe(resultingFolder).catch(() => undefined);
+        }
+        const remapPath = (value: string) => resultingFolder + value.slice(String(sourceFolder).length);
+        if (cached) {
+          if (Array.isArray(cached.emails)) {
+            cached.emails = cached.emails.map((mail: any) => {
+              const currentFolder = String(mail.folder || mail.imapFolder || "");
+              if (!belongsToSourceTree(currentFolder)) return mail;
+              const nextFolder = remapPath(currentFolder);
+              const uid = getMailUid(mail);
+              return { ...mail, id: uid ? makeImapEmailId(email, nextFolder, uid) : mail.id, folder: nextFolder, imapFolder: nextFolder };
+            });
+          }
+          if (Array.isArray(cached.folders)) {
+            cached.folders = cached.folders.map((folder: any) => {
+              const currentPath = String(folder.path || folder.id || "");
+              if (!belongsToSourceTree(currentPath)) return folder;
+              const nextPath = remapPath(currentPath);
+              return {
+                ...folder,
+                id: nextPath,
+                path: nextPath,
+                label: leafName(nextPath),
+                parentPath: nextPath.includes(delimiter) ? nextPath.slice(0, nextPath.lastIndexOf(delimiter)) : "",
+                depth: nextPath.split(delimiter).length - 1
+              };
+            });
+          }
+          cached.syncedAt = new Date().toISOString();
+          await writeMailCache(email, cached);
+        }
+        return res.json({ ok: true, action, delimiter, resultingFolder });
+      }
+
+      const sourceTree = folders
+        .filter(folder => belongsToSourceTree(folder.path))
+        .sort((left, right) => right.path.length - left.path.length);
+      for (const folder of sourceTree) {
+        if ((folder as any).subscribed) await client.mailboxUnsubscribe(folder.path).catch(() => undefined);
+        await client.mailboxDelete(folder.path);
+      }
+      if (cached) {
+        if (Array.isArray(cached.emails)) {
+          cached.emails = cached.emails.filter((mail: any) => !belongsToSourceTree(String(mail.folder || mail.imapFolder || "")));
+        }
+        if (Array.isArray(cached.folders)) {
+          cached.folders = cached.folders.filter((folder: any) => !belongsToSourceTree(String(folder.path || folder.id || "")));
+        }
+        cached.syncedAt = new Date().toISOString();
+        await writeMailCache(email, cached);
+      }
+      return res.json({ ok: true, action, delimiter, deletedFolder: sourceFolder, deletedFolders: sourceTree.length });
+    } catch (error: any) {
+      res.status(502).json({ error: error?.message || "Die Ordneränderung konnte nicht mit dem IMAP-Server synchronisiert werden." });
     } finally {
       await client.logout().catch(() => undefined);
     }

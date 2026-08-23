@@ -7,7 +7,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Inbox, Send, Trash2, Archive, Folder, ChevronDown, ChevronRight, Star, 
-  Search, ShieldAlert, FileText, Settings, AppWindow, Database, RefreshCw, X, GripVertical
+  Search, ShieldAlert, FileText, Settings, AppWindow, Database, RefreshCw, X, GripVertical, FolderPlus, Pencil
 } from 'lucide-react';
 import { Email } from '../types';
 
@@ -58,6 +58,13 @@ interface FolderTreeProps {
     destinationFolder: string;
     mode: 'nest' | 'merge';
   }) => Promise<void> | void;
+  onManageFolder?: (request: {
+    accountEmail: string;
+    action: 'create' | 'rename' | 'delete';
+    parentFolder?: string;
+    sourceFolder?: string;
+    name?: string;
+  }) => Promise<{ resultingFolder?: string; delimiter?: string } | void> | void;
 }
 
 export default function FolderTree({
@@ -69,7 +76,8 @@ export default function FolderTree({
   activeAccountEmail,
   setActiveAccountEmail,
   onMoveEmailsToFolder,
-  onMoveFolder
+  onMoveFolder,
+  onManageFolder
 }: FolderTreeProps) {
   type FavoriteFolderEntry = { accountEmail: string; id: string; label: string };
   type PendingFolderDrop = {
@@ -88,6 +96,21 @@ export default function FolderTree({
     folderId: string;
     label: string;
     delimiter: string;
+  };
+  type FolderContextTarget = {
+    x: number;
+    y: number;
+    accountEmail: string;
+    folderId: string;
+    label: string;
+    delimiter: string;
+    canModify: boolean;
+  };
+  type FolderActionDialog = Omit<FolderContextTarget, 'x' | 'y' | 'canModify'> & {
+    action: 'create' | 'rename' | 'delete';
+    name: string;
+    error: string;
+    busy: boolean;
   };
 
   const normalizeFavoriteFolders = (value: unknown): FavoriteFolderEntry[] => {
@@ -121,6 +144,8 @@ export default function FolderTree({
   const [pendingFolderDrop, setPendingFolderDrop] = useState<PendingFolderDrop | null>(null);
   const [folderMoveError, setFolderMoveError] = useState('');
   const [isMovingFolder, setIsMovingFolder] = useState(false);
+  const [folderContextMenu, setFolderContextMenu] = useState<FolderContextTarget | null>(null);
+  const [folderActionDialog, setFolderActionDialog] = useState<FolderActionDialog | null>(null);
   const pointerFolderDragRef = useRef<PointerFolderDrag | null>(null);
   const suppressFolderClickRef = useRef(false);
   const [favoriteFolderEntries, setFavoriteFolderEntries] = useState<FavoriteFolderEntry[]>(() => {
@@ -157,6 +182,20 @@ export default function FolderTree({
       window.removeEventListener('storage', reloadFavoriteFolders);
     };
   }, []);
+
+  useEffect(() => {
+    if (!folderContextMenu) return;
+    const close = () => setFolderContextMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
+    window.addEventListener('resize', close);
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('resize', close);
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [folderContextMenu]);
 
   const startLocalArchiveSync = () => {
     if (isHardSyncing) return;
@@ -566,6 +605,50 @@ export default function FolderTree({
       setIsMovingFolder(false);
     }
   };
+
+  const openFolderAction = (target: FolderContextTarget, action: 'create' | 'rename' | 'delete') => {
+    setFolderContextMenu(null);
+    setFolderActionDialog({
+      accountEmail: target.accountEmail,
+      folderId: target.folderId,
+      label: target.label,
+      delimiter: target.delimiter,
+      action,
+      name: action === 'rename' ? target.label : '',
+      error: '',
+      busy: false
+    });
+  };
+
+  const executeFolderAction = async () => {
+    const dialog = folderActionDialog;
+    if (!dialog || !onManageFolder || dialog.busy) return;
+    const name = dialog.name.trim();
+    if (dialog.action !== 'delete' && !name) {
+      setFolderActionDialog(previous => previous ? { ...previous, error: 'Bitte einen Ordnernamen eingeben.' } : previous);
+      return;
+    }
+    setFolderActionDialog(previous => previous ? { ...previous, busy: true, error: '' } : previous);
+    try {
+      await onManageFolder({
+        accountEmail: dialog.accountEmail,
+        action: dialog.action,
+        parentFolder: dialog.action === 'create' ? dialog.folderId : undefined,
+        sourceFolder: dialog.action === 'create' ? undefined : dialog.folderId,
+        name: dialog.action === 'delete' ? undefined : name
+      });
+      if (dialog.action === 'create') {
+        setCollapsedFolders(previous => ({ ...previous, [folderNodeKey(dialog.accountEmail, dialog.folderId)]: false }));
+      }
+      setFolderActionDialog(null);
+    } catch (error: any) {
+      setFolderActionDialog(previous => previous ? {
+        ...previous,
+        busy: false,
+        error: error?.message || 'Die Ordneränderung konnte nicht ausgeführt werden.'
+      } : previous);
+    }
+  };
   const handleFolderClick = (accountEmail: string, folderId: string) => {
     setActiveAccountEmail(accountEmail);
     setSelectedFolder(folderId);
@@ -734,6 +817,19 @@ export default function FolderTree({
                           }
                           if (folder.isSelectable !== false) handleFolderClick(account.email, folder.id);
                         }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setFolderContextMenu({
+                            x: Math.min(event.clientX, window.innerWidth - 250),
+                            y: Math.min(event.clientY, window.innerHeight - 150),
+                            accountEmail: account.email,
+                            folderId: folder.id,
+                            label: folder.label,
+                            delimiter: folder.delimiter || '/',
+                            canModify: canMoveFolder(folder)
+                          });
+                        }}
                         onDragOver={(e) => { if (folder.isSelectable !== false) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
                         onDrop={(e) => handleFolderDrop(e, account.email, folder)}
                         draggable={false}
@@ -835,6 +931,87 @@ export default function FolderTree({
         </div>
       )}
     </div>
+    {folderContextMenu && createPortal(
+      <div
+        id="folder-context-menu"
+        role="menu"
+        className="fixed z-[10060] w-60 border border-slate-300 bg-white py-1 shadow-xl text-slate-800"
+        style={{ left: Math.max(6, folderContextMenu.x), top: Math.max(6, folderContextMenu.y) }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="border-b border-slate-200 px-3 py-2 text-[10px] font-extrabold uppercase text-slate-500 truncate" title={folderContextMenu.folderId}>
+          {folderContextMenu.label}
+        </div>
+        <button type="button" role="menuitem" onClick={() => openFolderAction(folderContextMenu, 'create')} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold hover:bg-blue-50 hover:text-[#005a9e]">
+          <FolderPlus className="h-4 w-4 text-[#0078d4]" /> Neuen Unterordner erstellen
+        </button>
+        {folderContextMenu.canModify && (
+          <>
+            <button type="button" role="menuitem" onClick={() => openFolderAction(folderContextMenu, 'rename')} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold hover:bg-slate-100">
+              <Pencil className="h-4 w-4 text-slate-500" /> Ordner umbenennen
+            </button>
+            <button type="button" role="menuitem" onClick={() => openFolderAction(folderContextMenu, 'delete')} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold text-red-600 hover:bg-red-50">
+              <Trash2 className="h-4 w-4" /> Ordner löschen
+            </button>
+          </>
+        )}
+      </div>,
+      document.body
+    )}
+    {folderActionDialog && createPortal(
+      <div
+        id="folder-action-modal"
+        className="fixed inset-0 z-[10070] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[1px]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="folder-action-title"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !folderActionDialog.busy) setFolderActionDialog(null);
+        }}
+      >
+        <form
+          className="w-[460px] max-w-full border border-slate-300 bg-white shadow-2xl text-slate-800"
+          onSubmit={(event) => { event.preventDefault(); void executeFolderAction(); }}
+        >
+          <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
+            <h2 id="folder-action-title" className="text-sm font-extrabold">
+              {folderActionDialog.action === 'create' ? 'Neuen Unterordner erstellen' : folderActionDialog.action === 'rename' ? 'Ordner umbenennen' : 'Ordner löschen'}
+            </h2>
+            <p className="mt-1 text-[11px] text-slate-500 truncate" title={folderActionDialog.folderId}>{folderActionDialog.folderId}</p>
+          </div>
+          <div className="space-y-3 p-5">
+            {folderActionDialog.action === 'delete' ? (
+              <div className="border border-red-200 bg-red-50 px-4 py-3 text-[11px] leading-relaxed text-red-800">
+                <strong>„{folderActionDialog.label}“ wirklich löschen?</strong><br />Der Ordner, alle Unterordner und die darin enthaltenen Nachrichten werden dauerhaft vom IMAP-Server entfernt.
+              </div>
+            ) : (
+              <label className="block text-[10px] font-extrabold uppercase text-slate-600">
+                Ordnername
+                <input
+                  autoFocus
+                  value={folderActionDialog.name}
+                  maxLength={100}
+                  onChange={(event) => setFolderActionDialog(previous => previous ? { ...previous, name: event.target.value, error: '' } : previous)}
+                  className="mt-2 w-full border border-slate-300 bg-white px-3 py-2 text-xs normal-case outline-none focus:border-[#0078d4] focus:ring-1 focus:ring-[#0078d4]"
+                  placeholder="Ordnername eingeben"
+                />
+              </label>
+            )}
+            {folderActionDialog.error && <p className="border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">{folderActionDialog.error}</p>}
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-3">
+            <span className="text-[10px] text-slate-500">{folderActionDialog.busy ? 'Serveränderung wird synchronisiert...' : 'Die Änderung wird direkt auf dem IMAP-Server ausgeführt.'}</span>
+            <div className="flex gap-2">
+              <button type="button" disabled={folderActionDialog.busy} onClick={() => setFolderActionDialog(null)} className="border border-slate-300 bg-white px-4 py-1.5 text-[11px] font-bold hover:bg-slate-100 disabled:opacity-60">Abbrechen</button>
+              <button type="submit" disabled={folderActionDialog.busy} className={`px-4 py-1.5 text-[11px] font-bold text-white disabled:opacity-60 ${folderActionDialog.action === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-[#0078d4] hover:bg-[#005a9e]'}`}>
+                {folderActionDialog.busy ? 'Bitte warten...' : folderActionDialog.action === 'create' ? 'Erstellen' : folderActionDialog.action === 'rename' ? 'Umbenennen' : 'Löschen'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>,
+      document.body
+    )}
     {pendingFolderDrop && createPortal(
       <div
         id="folder-drop-choice-modal"

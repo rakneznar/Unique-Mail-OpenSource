@@ -18,7 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, 
 import AppLogo from './components/AppLogo';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.52';
+const APP_VERSION = '0.4.53';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -809,9 +809,7 @@ exit`;
   };
 
   // Security gate for WPF Suite
-  const [isWpfUnlocked, setIsWpfUnlocked] = useState<boolean>(() => {
-    return localStorage.getItem('outlook_wpf_unlocked') === 'true';
-  });
+  const [isWpfUnlocked, setIsWpfUnlocked] = useState<boolean>(false);
   const [showPwdModal, setShowPwdModal] = useState<boolean>(false);
   const [pwdValue, setPwdValue] = useState<string>('');
   const [pwdError, setPwdError] = useState<string>('');
@@ -3545,6 +3543,145 @@ Julia`,
     triggerPostActionSync('Ordnerstruktur geändert');
   };
 
+  const manageFolderOnServer = async (request: {
+    accountEmail: string;
+    action: 'create' | 'rename' | 'delete';
+    parentFolder?: string;
+    sourceFolder?: string;
+    name?: string;
+  }) => {
+    const account = accounts.find(item => item.email.toLowerCase() === request.accountEmail.toLowerCase());
+    if (!account) throw new Error('Das E-Mail-Konto des Ordners wurde nicht gefunden.');
+    const password = await getSessionPassword(account);
+    if (!password) throw new Error('Für die Serveränderung wird das gespeicherte Kontopasswort benötigt.');
+
+    const actionText = request.action === 'create' ? 'Unterordner wird erstellt...'
+      : request.action === 'rename' ? 'Ordner wird umbenannt...'
+        : 'Ordner wird gelöscht...';
+    setSyncStatusText(actionText);
+    const response = await fetch('/api/mail/folders/manage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: account.email,
+        password,
+        imapServer: account.imapServer,
+        imapPort: account.imapPort,
+        action: request.action,
+        parentFolder: request.parentFolder,
+        sourceFolder: request.sourceFolder,
+        name: request.name
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = result.error || 'Die Ordneränderung konnte nicht mit dem IMAP-Server synchronisiert werden.';
+      setSyncStatusText(`Ordneränderung fehlgeschlagen: ${message}`);
+      throw new Error(message);
+    }
+
+    const delimiter = String(result.delimiter || '/');
+    const sourceFolder = String(request.sourceFolder || '');
+    const sourceKey = sourceFolder.toLowerCase();
+    const belongsToSourceTree = (folderPath?: string) => {
+      const value = String(folderPath || '').toLowerCase();
+      return !!sourceKey && (value === sourceKey || value.startsWith(sourceKey + delimiter.toLowerCase()));
+    };
+    const resultingFolder = String(result.resultingFolder || '');
+    const remapPath = (folderPath: string) => resultingFolder + folderPath.slice(sourceFolder.length);
+    const folderLeaf = (folderPath: string) => folderPath.includes(delimiter)
+      ? folderPath.slice(folderPath.lastIndexOf(delimiter) + delimiter.length)
+      : folderPath;
+
+    if (request.action === 'create') {
+      setAccounts(prev => prev.map(item => {
+        if (item.email.toLowerCase() !== account.email.toLowerCase()) return item;
+        const serverFolders = Array.isArray(item.serverFolders) ? item.serverFolders : [];
+        if (serverFolders.some((folder: any) => String(folder.path || folder.id || '').toLowerCase() === resultingFolder.toLowerCase())) return item;
+        return {
+          ...item,
+          serverFolders: [...serverFolders, {
+            id: resultingFolder,
+            path: resultingFolder,
+            label: folderLeaf(resultingFolder),
+            delimiter,
+            parentPath: request.parentFolder || '',
+            depth: resultingFolder.split(delimiter).length - 1,
+            flags: [],
+            specialUse: null,
+            listed: true,
+            subscribed: true,
+            status: { messages: 0, unseen: 0 }
+          }]
+        };
+      }));
+      setActiveAccountEmail(account.email);
+      setSelectedFolder(resultingFolder);
+      setSyncStatusText(`Unterordner „${folderLeaf(resultingFolder)}“ erstellt und synchronisiert.`);
+    } else if (request.action === 'rename') {
+      setEmails(prev => prev.map(mail => {
+        if ((mail.accountEmail || '').toLowerCase() !== account.email.toLowerCase() || !belongsToSourceTree(mail.imapFolder || mail.folder)) return mail;
+        const currentFolder = mail.imapFolder || mail.folder || sourceFolder;
+        const nextFolder = remapPath(currentFolder);
+        return { ...mail, folder: nextFolder, imapFolder: nextFolder };
+      }));
+      setAccounts(prev => prev.map(item => {
+        if (item.email.toLowerCase() !== account.email.toLowerCase()) return item;
+        return {
+          ...item,
+          serverFolders: (item.serverFolders || []).map((folder: any) => {
+            const currentPath = String(folder.path || folder.id || '');
+            if (!belongsToSourceTree(currentPath)) return folder;
+            const nextPath = remapPath(currentPath);
+            return {
+              ...folder,
+              id: nextPath,
+              path: nextPath,
+              label: folderLeaf(nextPath),
+              parentPath: nextPath.includes(delimiter) ? nextPath.slice(0, nextPath.lastIndexOf(delimiter)) : '',
+              depth: nextPath.split(delimiter).length - 1
+            };
+          })
+        };
+      }));
+      if (belongsToSourceTree(selectedFolder)) setSelectedFolder(remapPath(selectedFolder));
+      setSyncStatusText(`Ordner in „${folderLeaf(resultingFolder)}“ umbenannt und synchronisiert.`);
+    } else {
+      setEmails(prev => prev.filter(mail => (mail.accountEmail || '').toLowerCase() !== account.email.toLowerCase() || !belongsToSourceTree(mail.imapFolder || mail.folder)));
+      setAccounts(prev => prev.map(item => item.email.toLowerCase() !== account.email.toLowerCase()
+        ? item
+        : { ...item, serverFolders: (item.serverFolders || []).filter((folder: any) => !belongsToSourceTree(String(folder.path || folder.id || ''))) }
+      ));
+      if (belongsToSourceTree(selectedFolder)) {
+        const parent = sourceFolder.includes(delimiter) ? sourceFolder.slice(0, sourceFolder.lastIndexOf(delimiter)) : 'inbox';
+        setSelectedFolder(parent || 'inbox');
+      }
+      setSelectedEmailId(null);
+      setSyncStatusText(`Ordner „${folderLeaf(sourceFolder)}“ und seine Unterordner gelöscht und synchronisiert.`);
+    }
+
+    try {
+      const saved = JSON.parse(localStorage.getItem('uniquemail_folder_favorites') || '[]');
+      if (Array.isArray(saved) && request.action !== 'create') {
+        const nextFavorites = saved
+          .map((favorite: any) => {
+            if (String(favorite.accountEmail || '').toLowerCase() !== account.email.toLowerCase() || !belongsToSourceTree(favorite.id)) return favorite;
+            if (request.action === 'delete') return null;
+            const nextId = remapPath(String(favorite.id || ''));
+            return { ...favorite, id: nextId, label: folderLeaf(nextId) };
+          })
+          .filter(Boolean);
+        localStorage.setItem('uniquemail_folder_favorites', JSON.stringify(nextFavorites));
+        window.dispatchEvent(new Event('uniquemail-folder-favorites-updated'));
+      }
+    } catch {
+      // Malformed legacy favorites must not block a successful IMAP operation.
+    }
+
+    triggerPostActionSync('Ordnerstruktur geändert');
+    return result;
+  };
+
   const moveEmailsToSpecificFolder = (ids: string[], destinationFolder: string) => {
     const targetEmails = emails.filter(mail => ids.includes(mail.id));
     if (targetEmails.length === 0) return;
@@ -3850,16 +3987,20 @@ Julia`,
     }
   };
 
-  const handleVerifyPassword = () => {
+  const handleVerifyPassword = async () => {
     const trimmed = pwdValue.trim();
-    if (trimmed === '4620' || trimmed.includes('4620') || trimmed.toLowerCase() === 'admin') {
+    if (!appLockConfig?.enabled) {
+      setPwdError('Bitte richten Sie zuerst unter Einstellungen > Allgemein ein App-Passwort ein.');
+      return;
+    }
+    const enteredHash = await hashAppLockPassword(trimmed, appLockConfig.salt);
+    if (enteredHash === appLockConfig.hash) {
       setIsWpfUnlocked(true);
-      localStorage.setItem('outlook_wpf_unlocked', 'true');
       setShowPwdModal(false);
       setCurrentPage('dev');
       setActiveTab('dev');
     } else {
-      setPwdError('Falscher Systemschlüssel (Passwort: 4620). Zugriff verweigert.');
+      setPwdError('Das eingegebene App-Passwort ist falsch. Zugriff verweigert.');
     }
   };
 
@@ -4170,6 +4311,7 @@ Julia`,
                 setActiveAccountEmail={setActiveAccountEmail}
                 onMoveEmailsToFolder={moveEmailsToSpecificFolder}
                 onMoveFolder={moveFolderOnServer}
+                onManageFolder={manageFolderOnServer}
               />
             )}
 
@@ -5513,7 +5655,7 @@ Julia`,
                     setPwdError('');
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleVerifyPassword();
+                    if (e.key === 'Enter') void handleVerifyPassword();
                   }}
                   autoFocus
                   placeholder="Geben Sie den Admin-Schlüssel ein..."
@@ -5524,17 +5666,7 @@ Julia`,
                     <span></span><span>{pwdError}</span>
                   </p>
                 )}
-                <div 
-                  onClick={() => {
-                    setPwdValue('4620');
-                    setPwdError('');
-                  }}
-                  className="text-[10.5px] text-blue-600 hover:text-blue-800 mt-2 font-bold cursor-pointer transition-colors hover:underline flex items-center space-x-1"
-                  title="Klicken, um den Systemschlüssel automatisch einzutragen"
-                >
-                  <span>✨</span>
-                  <span>Hinweis: Systemschlüssel hinterlegt (Klick für Auto-Fill)</span>
-                </div>
+                <p className="mt-2 text-[10.5px] font-semibold text-slate-500">Verwenden Sie das unter Einstellungen &gt; Allgemein festgelegte App-Passwort.</p>
               </div>
 
               <div className="flex space-x-2 pt-2">
@@ -5546,7 +5678,7 @@ Julia`,
                 </button>
                 <button
                   id="submit-wpf-password"
-                  onClick={handleVerifyPassword}
+                  onClick={() => void handleVerifyPassword()}
                   className="w-1/2 py-2.2 text-xs bg-[#0078d4] text-white rounded-xl hover:bg-[#106ebe] font-bold shadow-md transition-all cursor-pointer active:scale-95 text-center"
                 >
                   Verifizieren
