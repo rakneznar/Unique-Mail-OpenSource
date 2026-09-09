@@ -19,7 +19,7 @@ import AppLogo from './components/AppLogo';
 import { parseRecipientTokens } from './utils/recipients';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.54';
+const APP_VERSION = '0.4.55';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';

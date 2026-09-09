@@ -12,6 +12,39 @@ import {
 import { Email, Contact, Task, CalendarItem, Category } from '../types';
 import { addEmailsToDragData } from '../utils/eml';
 
+export type MailDateGroup = 'today' | 'yesterday' | 'dayBeforeYesterday' | 'lastWeek' | 'twoWeeksAgo' | 'older';
+
+const MAIL_DATE_GROUP_ORDER: MailDateGroup[] = ['today', 'yesterday', 'dayBeforeYesterday', 'lastWeek', 'twoWeeksAgo', 'older'];
+const AVATAR_COLORS = ['#0f6cbd', '#107c41', '#8e562e', '#5c2d91', '#b146c2', '#c23934', '#0078d4', '#8764b8'];
+
+const startOfLocalDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+
+export const mailDateGroup = (dateValue: string, now = new Date()): MailDateGroup => {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return 'older';
+  const daysAgo = Math.max(0, Math.floor((startOfLocalDay(now) - startOfLocalDay(date)) / 86400000));
+  if (daysAgo === 0) return 'today';
+  if (daysAgo === 1) return 'yesterday';
+  if (daysAgo === 2) return 'dayBeforeYesterday';
+  if (daysAgo <= 7) return 'lastWeek';
+  if (daysAgo <= 14) return 'twoWeeksAgo';
+  return 'older';
+};
+
+const mailAvatar = (party: string, address: string) => {
+  const cleanedParty = String(party || '').replace(/<[^>]+>/g, '').trim();
+  const words = cleanedParty.split(/\s+/).filter(Boolean);
+  const localPart = String(address || '').split('@')[0].replace(/[^a-z0-9]+/gi, ' ').trim();
+  const fallbackWords = localPart.split(/\s+/).filter(Boolean);
+  const source = words.length ? words : fallbackWords;
+  const initials = source.length > 1
+    ? `${source[0][0] || ''}${source[source.length - 1][0] || ''}`
+    : (source[0] || '?').slice(0, 2);
+  const hashSource = String(address || party || '?').toLowerCase();
+  const hash = Array.from(hashSource).reduce((sum, character) => ((sum * 31) + character.charCodeAt(0)) >>> 0, 0);
+  return { initials: initials.toUpperCase(), color: AVATAR_COLORS[hash % AVATAR_COLORS.length] };
+};
+
 interface ItemListProps {
   currentPage: 'mail' | 'calendar' | 'contacts' | 'crm' | 'tasks' | 'notes' | 'dev';
   emails: Email[];
@@ -205,7 +238,15 @@ export default function ItemList({
     all: language === 'en' ? 'All' : 'Alle',
     active: language === 'en' ? 'Active' : 'Aktiv',
     unread: language === 'en' ? 'Unread' : 'Ungelesen',
-    favorites: language === 'en' ? 'Favorites' : 'Favoriten'
+    favorites: language === 'en' ? 'Favorites' : 'Favoriten',
+    dateGroups: {
+      today: language === 'en' ? 'Today' : 'Heute',
+      yesterday: language === 'en' ? 'Yesterday' : 'Gestern',
+      dayBeforeYesterday: language === 'en' ? 'Day before yesterday' : 'Vorgestern',
+      lastWeek: language === 'en' ? 'Last week' : 'Letzte Woche',
+      twoWeeksAgo: language === 'en' ? 'Two weeks ago' : 'Vor zwei Wochen',
+      older: language === 'en' ? 'Older' : 'Älter'
+    } as Record<MailDateGroup, string>
   };
 
   // Helper function for Outlook-Classic equivalent multi-field full-text token indexing
@@ -307,7 +348,7 @@ export default function ItemList({
       </div>
 
       {/* 3. Items List Render */}
-      <div ref={mailScrollRef} className="flex-1 overflow-y-auto py-2 px-2.5 space-y-1.5 bg-slate-50/50" onScroll={handleListScroll}>
+      <div ref={mailScrollRef} className="flex-1 overflow-y-auto py-2 px-2.5 bg-slate-50/50 dark:bg-[#0b0f19]" onScroll={handleListScroll}>
         
         {/* === EMAILS LIST === */}
         {currentPage === 'mail' && (() => {
@@ -372,8 +413,11 @@ export default function ItemList({
             );
           }
 
-          // Sort: Pinned stay strictly at the top, then chronological date orders
+          // Date groups remain chronological; pinned messages stay first inside their own group.
           const sortedEmails = [...filteredEmails].sort((a, b) => {
+            const groupA = MAIL_DATE_GROUP_ORDER.indexOf(mailDateGroup(a.date));
+            const groupB = MAIL_DATE_GROUP_ORDER.indexOf(mailDateGroup(b.date));
+            if (groupA !== groupB) return groupA - groupB;
             const pinA = a.isPinned ? 1 : 0;
             const pinB = b.isPinned ? 1 : 0;
             if (pinA !== pinB) {
@@ -401,16 +445,31 @@ export default function ItemList({
 
           const currentIndex = Math.max(0, sortedEmails.findIndex(item => item.id === selectedEmailId));
           const virtualRowHeight = isDense ? 82 : 88;
-          const virtualOverscan = 10;
+          const groupRowHeight = 34;
+          const groupedRows: Array<{ type: 'group'; key: string; label: string; height: number } | { type: 'email'; key: string; email: Email; height: number }> = [];
+          let previousGroup: MailDateGroup | null = null;
+          sortedEmails.forEach(email => {
+            const group = mailDateGroup(email.date);
+            if (group !== previousGroup) {
+              groupedRows.push({ type: 'group', key: `group-${group}`, label: uiText.dateGroups[group], height: groupRowHeight });
+              previousGroup = group;
+            }
+            groupedRows.push({ type: 'email', key: email.id, email, height: virtualRowHeight });
+          });
+          const rowOffsets = [0];
+          groupedRows.forEach(row => rowOffsets.push(rowOffsets[rowOffsets.length - 1] + row.height));
+          const totalRowsHeight = rowOffsets[rowOffsets.length - 1];
+          const overscanPixels = virtualRowHeight * 10;
           const virtualViewportHeight = Math.max(mailListMetrics.viewportHeight || 600, 320);
-          const virtualStartIndex = Math.max(0, Math.floor(mailListMetrics.scrollTop / virtualRowHeight) - virtualOverscan);
-          const virtualEndIndex = Math.min(
-            sortedEmails.length,
-            Math.ceil((mailListMetrics.scrollTop + virtualViewportHeight) / virtualRowHeight) + virtualOverscan
-          );
-          const virtualEmails = sortedEmails.slice(virtualStartIndex, virtualEndIndex);
-          const virtualTopSpacer = virtualStartIndex * virtualRowHeight;
-          const virtualBottomSpacer = Math.max(0, (sortedEmails.length - virtualEndIndex) * virtualRowHeight);
+          const visibleTop = Math.max(0, mailListMetrics.scrollTop - overscanPixels);
+          const visibleBottom = mailListMetrics.scrollTop + virtualViewportHeight + overscanPixels;
+          let virtualStartIndex = 0;
+          while (virtualStartIndex < groupedRows.length && rowOffsets[virtualStartIndex + 1] < visibleTop) virtualStartIndex += 1;
+          let virtualEndIndex = virtualStartIndex;
+          while (virtualEndIndex < groupedRows.length && rowOffsets[virtualEndIndex] <= visibleBottom) virtualEndIndex += 1;
+          const virtualRows = groupedRows.slice(virtualStartIndex, virtualEndIndex);
+          const virtualTopSpacer = rowOffsets[virtualStartIndex];
+          const virtualBottomSpacer = Math.max(0, totalRowsHeight - rowOffsets[virtualEndIndex]);
 
           return (
             <div
@@ -452,7 +511,16 @@ export default function ItemList({
               }}
             >
               {virtualTopSpacer > 0 && <div aria-hidden="true" style={{ height: virtualTopSpacer }} />}
-          {virtualEmails.map((email) => {
+          {virtualRows.map((row) => {
+            if (row.type === 'group') {
+              return (
+                <div key={row.key} className="flex h-[34px] items-end gap-2 px-1 pb-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                  <span className="whitespace-nowrap">{row.label}</span>
+                  <span className="mb-0.5 h-px flex-1 bg-slate-300 dark:bg-slate-700" />
+                </div>
+              );
+            }
+            const email = row.email;
             const isSelected = selectedEmailId === email.id;
             const isMultiSelected = selectedEmailIds.includes(email.id);
             const normalizedFolder = String(email.imapFolder || email.folder || selectedFolder || '').toLowerCase();
@@ -460,10 +528,11 @@ export default function ItemList({
             const listParty = showRecipient
               ? (email.recipientEmail || email.recipientName || 'Kein Empfaenger')
               : email.sender;
+            const avatar = mailAvatar(listParty, showRecipient ? (email.recipientEmail || '') : email.senderEmail);
             return (
               <div
                 id={`email-item-${email.id}`}
-                key={email.id}
+                key={row.key}
                 draggable
                 onDragStart={(e) => {
                   const ids = selectedEmailIds.includes(email.id) ? selectedEmailIds : [email.id];
@@ -491,8 +560,8 @@ export default function ItemList({
                   }
                 }}
                 onContextMenu={(e) => handleRightClick(e, email.id)}
-                className={`group text-left relative cursor-pointer rounded-lg border transition-all duration-150 overflow-hidden min-h-[74px] mb-1.5 ${
-                  isDense ? 'px-2.5 py-2 pr-2.5 pb-2' : 'px-3 py-2.5 pr-3 pb-2'
+                className={`group text-left relative cursor-pointer rounded-lg border transition-all duration-150 overflow-hidden min-h-[74px] mb-1.5 pl-12 ${
+                  isDense ? 'py-2 pr-2.5 pb-2' : 'py-2.5 pr-3 pb-2'
                 } ${
                   email.isPinned
                     ? isSelected
@@ -508,6 +577,15 @@ export default function ItemList({
                   <div className="absolute left-0 top-3 bottom-3 w-1 bg-[#0078d4] rounded-r-lg"></div>
                 )}
 
+                <div
+                  className="absolute left-2.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-[10px] font-extrabold text-white shadow-sm dark:border-[#141a29]"
+                  style={{ backgroundColor: avatar.color }}
+                  title={showRecipient ? `Empfänger: ${listParty}` : `Absender: ${listParty}`}
+                  aria-hidden="true"
+                >
+                  {avatar.initials}
+                </div>
+
                 {/* Account Label tag if in Unified inbox */}
                 {selectedFolder === 'unified-inbox' && email.accountEmail && (
                   <div className="text-[8.5px] font-extrabold uppercase text-[#0078d4] bg-[#0078d4]/10 px-1.5 py-0.5 rounded-md inline-block mb-1.5 max-w-full truncate">
@@ -516,7 +594,7 @@ export default function ItemList({
                 )}
 
                 <div className="flex justify-between items-start mb-1">
-                  <span className={`text-[11.5px] truncate max-w-[190px] ${!email.isRead ? 'font-extrabold text-slate-900 dark:text-slate-100' : 'text-slate-700 dark:text-slate-300 font-medium'}`}>
+                  <span className={`text-[11.5px] truncate max-w-[155px] ${!email.isRead ? 'font-extrabold text-slate-900 dark:text-slate-100' : 'text-slate-700 dark:text-slate-300 font-medium'}`}>
                     {listParty}
                   </span>
                   <div className="flex items-center space-x-1.5 shrink-0">
@@ -533,7 +611,7 @@ export default function ItemList({
                 </div>
 
                 <div className="flex justify-between items-center mb-1.5">
-                  <span className={`text-xs truncate max-w-[190px] ${!email.isRead ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'}`}>
+                  <span className={`text-xs truncate max-w-[185px] ${!email.isRead ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'}`}>
                     {email.subject}
                   </span>
                   
