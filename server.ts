@@ -182,11 +182,23 @@ function ensureUidList(value: any) {
 }
 
 function normalizeAddressList(value?: string) {
-  return (value || "")
-    .split(/[;,]/)
-    .map(item => item.trim())
-    .filter(Boolean)
-    .join(", ");
+  const entries: string[] = [];
+  let current = "";
+  let angleDepth = 0;
+  let quote = "";
+  for (const character of String(value || "")) {
+    if ((character === '"' || character === "'") && (!quote || quote === character)) quote = quote ? "" : character;
+    if (!quote && character === "<") angleDepth += 1;
+    if (!quote && character === ">") angleDepth = Math.max(0, angleDepth - 1);
+    if (!quote && angleDepth === 0 && (character === "," || character === ";" || character === "\r" || character === "\n")) {
+      if (current.trim()) entries.push(current.trim());
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+  if (current.trim()) entries.push(current.trim());
+  return entries.join(", ");
 }
 
 function normalizeProviderDomain(domain: string) {
@@ -195,6 +207,26 @@ function normalizeProviderDomain(domain: string) {
 
 function localAutodiscoverSettings(email: string) {
   const domain = normalizeProviderDomain(email.split("@")[1] || "");
+  if (domain === "mail.de") {
+    return {
+      imapServer: "imap.mail.de",
+      imapPort: 993,
+      smtpServer: "smtp.mail.de",
+      smtpPort: 587,
+      provider: "mail.de",
+      confidence: "preset",
+    };
+  }
+  if (domain === "inbox.lv" || domain === "inbox.eu" || domain.endsWith(".inbox.lv") || domain.endsWith(".inbox.eu")) {
+    return {
+      imapServer: "mail.inbox.lv",
+      imapPort: 993,
+      smtpServer: "mail.inbox.lv",
+      smtpPort: 587,
+      provider: "Inbox.lv / Inbox.eu",
+      confidence: "preset",
+    };
+  }
   if (domain === "spacemail.com" || domain.endsWith(".spacemail.com") || domain === "spaceship.com" || domain.endsWith(".spaceship.com")) {
     return {
       imapServer: "mail.spacemail.com",
@@ -270,6 +302,96 @@ function buildSmtpAttachments(attachments: SendMailRequest["attachments"]): Mail
       contentType: item.contentType || "application/octet-stream",
       content: Buffer.from(item.contentBase64, "base64"),
     }));
+}
+
+function normalizeLegacyMailHost(email: string, host: string, protocol: "imap" | "smtp") {
+  const domain = normalizeProviderDomain(email.split("@")[1] || "");
+  const normalizedHost = String(host || "").trim().toLowerCase();
+  if (domain === "inbox.lv" || domain === "inbox.eu" || domain.endsWith(".inbox.lv") || domain.endsWith(".inbox.eu")) {
+    if (!normalizedHost || normalizedHost === `${protocol}.inbox.lv` || normalizedHost === `${protocol}.inbox.eu`) return "mail.inbox.lv";
+  }
+  return normalizedHost;
+}
+
+function smtpConnectionOptions(host: string, port: number, email: string, password: string) {
+  return {
+    host,
+    port,
+    secure: port === 465,
+    requireTLS: port === 587,
+    auth: { user: email, pass: password },
+    family: 4,
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 30000,
+    tls: { servername: host, minVersion: "TLSv1.2" as const },
+  };
+}
+
+function isPreDeliveryConnectionError(error: any) {
+  if (Number(error?.responseCode) > 0) return false;
+  if (String(error?.command || "").toUpperCase() === "CONN") return true;
+  return ["ECONNECTION", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "ESOCKET"].includes(String(error?.code || "").toUpperCase());
+}
+
+async function sendMailWithConnectionFallback(input: {
+  email: string;
+  password: string;
+  smtpServer: string;
+  smtpPort: number;
+  mailOptions: Mail.Options;
+}) {
+  const host = normalizeLegacyMailHost(input.email, input.smtpServer, "smtp");
+  const requestedPort = Number(input.smtpPort) || 587;
+  const ports = [requestedPort, ...(requestedPort === 465 ? [587] : requestedPort === 587 ? [465] : [])];
+  let lastError: any;
+  for (let index = 0; index < ports.length; index += 1) {
+    const port = ports[index];
+    const transporter = nodemailer.createTransport(smtpConnectionOptions(host, port, input.email, input.password));
+    try {
+      console.info("SMTP send attempt", { email: input.email, host, port, attempt: index + 1 });
+      const info = await transporter.sendMail(input.mailOptions);
+      const accepted = Array.isArray(info.accepted) ? info.accepted : [];
+      const rejected = Array.isArray(info.rejected) ? info.rejected : [];
+      if (accepted.length === 0 && rejected.length > 0) throw new Error(`Der SMTP-Server hat alle Empfänger abgelehnt: ${rejected.join(", ")}`);
+      console.info("SMTP message accepted", { email: input.email, host, port, messageId: info.messageId, accepted: accepted.length, rejected: rejected.length });
+      return { info, host, port };
+    } catch (error: any) {
+      lastError = error;
+      const retry = index < ports.length - 1 && isPreDeliveryConnectionError(error);
+      console.warn("SMTP send attempt failed", { email: input.email, host, port, code: error?.code, command: error?.command, retry, message: error?.message });
+      if (!retry) throw error;
+    } finally {
+      transporter.close();
+    }
+  }
+  throw lastError || new Error("SMTP-Verbindung konnte nicht hergestellt werden.");
+}
+
+async function appendSentCopyInBackground(input: {
+  email: string;
+  password: string;
+  imapServer: string;
+  imapPort: number;
+  sentFolder: string;
+  mailOptions: Mail.Options;
+}) {
+  const rawTransporter = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: "unix" });
+  const rawInfo = await rawTransporter.sendMail(input.mailOptions);
+  const rawMessage = Buffer.isBuffer(rawInfo.message) ? rawInfo.message : Buffer.from(String(rawInfo.message || ""));
+  const imapClient = createImapClient({
+    email: input.email,
+    password: input.password,
+    imapServer: normalizeLegacyMailHost(input.email, input.imapServer, "imap"),
+    imapPort: input.imapPort,
+  });
+  await imapClient.connect();
+  try {
+    await imapClient.append(input.sentFolder, rawMessage, ["\\Seen"], new Date());
+    console.info("Sent copy appended", { email: input.email, folder: input.sentFolder });
+  } finally {
+    await imapClient.logout().catch(() => undefined);
+  }
 }
 
 function createImapClient({ email, password, imapServer, imapPort }: SyncInboxRequest) {
@@ -859,41 +981,9 @@ async function startServer() {
       attachments: buildSmtpAttachments(attachments),
     };
 
-    const smtpTransporter = nodemailer.createTransport({
-      host: smtpServer,
-      port: Number(smtpPort),
-      secure: Number(smtpPort) === 465,
-      requireTLS: Number(smtpPort) === 587,
-      auth: {
-        user: email,
-        pass: password,
-      },
-      connectionTimeout: 20000,
-      greetingTimeout: 20000,
-      socketTimeout: 30000,
-    });
-
     try {
-      const smtpInfo = await smtpTransporter.sendMail(mailOptions);
-      let sentAppend: { ok: boolean; error?: string; folder?: string } = { ok: false };
-
-      if (imapServer && imapPort && sentFolder) {
-        try {
-          const rawTransporter = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: "unix" });
-          const rawInfo = await rawTransporter.sendMail(mailOptions);
-          const rawMessage = Buffer.isBuffer(rawInfo.message) ? rawInfo.message : Buffer.from(String(rawInfo.message || ""));
-          const imapClient = createImapClient({ email, password, imapServer, imapPort });
-          await imapClient.connect();
-          try {
-            await imapClient.append(sentFolder, rawMessage, ["\\Seen"], new Date());
-            sentAppend = { ok: true, folder: sentFolder };
-          } finally {
-            await imapClient.logout().catch(() => undefined);
-          }
-        } catch (appendError: any) {
-          sentAppend = { ok: false, folder: sentFolder, error: appendError?.message || String(appendError) };
-        }
-      }
+      const smtpResult = await sendMailWithConnectionFallback({ email, password, smtpServer, smtpPort: Number(smtpPort), mailOptions });
+      const smtpInfo = smtpResult.info;
 
       res.json({
         ok: true,
@@ -901,11 +991,30 @@ async function startServer() {
         accepted: smtpInfo.accepted || [],
         rejected: smtpInfo.rejected || [],
         response: smtpInfo.response,
-        sentAppend,
+        smtpHost: smtpResult.host,
+        smtpPort: smtpResult.port,
+        sentAppend: { ok: false, pending: !!(imapServer && imapPort && sentFolder), folder: sentFolder },
         sentAt: new Date().toISOString(),
       });
+
+      if (imapServer && imapPort && sentFolder) {
+        void appendSentCopyInBackground({ email, password, imapServer, imapPort: Number(imapPort), sentFolder, mailOptions })
+          .catch((appendError: any) => console.warn("Sent copy append failed", {
+            email,
+            folder: sentFolder,
+            code: appendError?.code,
+            message: appendError?.message || String(appendError),
+          }));
+      }
     } catch (error: any) {
-      res.status(502).json({ error: error?.message || "SMTP-Versand fehlgeschlagen." });
+      const timeout = ["ETIMEDOUT", "ECONNECTION"].includes(String(error?.code || "").toUpperCase()) || /timed?\s*out|timeout/i.test(String(error?.message || ""));
+      res.status(502).json({
+        error: timeout
+          ? `Zeitüberschreitung beim SMTP-Verbindungsaufbau zu ${normalizeLegacyMailHost(email, smtpServer, "smtp")}. Bitte Internetverbindung und SMTP-Einstellungen prüfen.`
+          : error?.message || "SMTP-Versand fehlgeschlagen.",
+        code: error?.code,
+        command: error?.command,
+      });
     }
   });
 

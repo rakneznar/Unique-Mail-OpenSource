@@ -3,6 +3,7 @@ import { Bold, Italic, Underline, List, ListOrdered, Mail, Paperclip, Send, Pane
 import type { ComposeMailPayload } from './ReadingPane';
 import { useComposePastePrompt } from './ComposePastePrompt';
 import { readEmlAttachmentsFromDrop } from '../utils/eml';
+import RecipientChipInput from './RecipientChipInput';
 
 type Account = { email: string; displayName?: string; senderName?: string; name?: string };
 type StoredContact = { email?: string; firstName?: string; lastName?: string };
@@ -53,7 +54,10 @@ export default function DetachedComposeWindow() {
       const email = String(item.email || '').trim().toLowerCase();
       if (email && !values.has(email)) values.set(email, item.displayName ? `${item.displayName} <${email}>` : email);
     });
-    return Array.from(values.entries()).map(([email, value]) => ({ email, value }));
+    return Array.from(values.entries()).map(([email, value]) => {
+      const nameMatch = value.match(/^(.*?)\s*</);
+      return { email, displayName: nameMatch?.[1]?.trim() || '' };
+    });
   }, [contacts, history]);
 
   React.useEffect(() => {
@@ -167,10 +171,9 @@ export default function DetachedComposeWindow() {
         </label>
         {(['to', 'cc', 'bcc'] as const).map(field => (
           <label key={field} className="grid grid-cols-[62px_1fr] items-center gap-2 text-xs"><span className="font-bold uppercase text-slate-500">{field === 'to' ? 'An' : field}</span>
-            <input list="detached-recipient-suggestions" value={payload[field]} onChange={event => update(field, event.target.value)} autoComplete="off" placeholder="Name oder E-Mail-Adresse" className="border border-slate-300 bg-white px-3 py-2 outline-none focus:border-[#0078d4] dark:border-slate-600 dark:bg-slate-800" />
+            <RecipientChipInput value={payload[field]} onChange={value => update(field, value)} suggestions={suggestions} placeholder="Name oder E-Mail-Adresse" ariaLabel={`${field.toUpperCase()} Empfänger`} />
           </label>
         ))}
-        <datalist id="detached-recipient-suggestions">{suggestions.map(item => <option key={item.email} value={item.value}>{item.email}</option>)}</datalist>
         <label className="grid grid-cols-[62px_1fr] items-center gap-2 text-xs"><span className="font-bold text-slate-500">BETREFF</span>
           <input value={payload.subject} onChange={event => update('subject', event.target.value)} className="border border-slate-300 bg-white px-3 py-2 outline-none focus:border-[#0078d4] dark:border-slate-600 dark:bg-slate-800" />
         </label>

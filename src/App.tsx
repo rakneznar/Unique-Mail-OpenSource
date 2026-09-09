@@ -16,9 +16,10 @@ import ArchTab from './components/ArchTab';
 import NotesView from './components/NotesView';
 import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, KnownRecipient } from './types';
 import AppLogo from './components/AppLogo';
+import { parseRecipientTokens } from './utils/recipients';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.53';
+const APP_VERSION = '0.4.54';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -84,6 +85,36 @@ const isSentMessage = (mail?: Email | null) => {
     || /(^|[\\/._ -])(sent|gesendet|sent items|gesendete elemente)([\\/._ -]|$)/i.test(folder);
 };
 
+const migrateLegacyAccountEndpoints = (account: any) => {
+  const email = String(account?.email || '').trim();
+  const domain = email.split('@')[1]?.toLowerCase() || '';
+  if (domain === 'inbox.lv' || domain === 'inbox.eu' || domain.endsWith('.inbox.lv') || domain.endsWith('.inbox.eu')) {
+    return {
+      ...account,
+      imapServer: 'mail.inbox.lv',
+      imapPort: 993,
+      smtpServer: 'mail.inbox.lv',
+      smtpPort: 587,
+      imapSecurity: 'ssl',
+      smtpSecurity: 'starttls',
+      provider: 'Inbox.lv / Inbox.eu'
+    };
+  }
+  if (domain === 'mail.de') {
+    return {
+      ...account,
+      imapServer: 'imap.mail.de',
+      imapPort: 993,
+      smtpServer: 'smtp.mail.de',
+      smtpPort: 587,
+      imapSecurity: 'ssl',
+      smtpSecurity: 'starttls',
+      provider: 'mail.de'
+    };
+  }
+  return account;
+};
+
 const sanitizeRecipientHistory = (value: unknown): KnownRecipient[] => {
   if (!Array.isArray(value)) return [];
   const byEmail = new Map<string, KnownRecipient>();
@@ -104,16 +135,8 @@ const sanitizeRecipientHistory = (value: unknown): KnownRecipient[] => {
     .slice(0, 500);
 };
 
-const parseRecipientAddressList = (value?: string) => String(value || '')
-  .split(/[;,]/)
-  .map(entry => {
-    const trimmed = entry.trim();
-    const bracketMatch = trimmed.match(/<([^>]+)>/);
-    const email = (bracketMatch ? bracketMatch[1] : trimmed).trim().toLowerCase();
-    const displayName = bracketMatch ? trimmed.slice(0, bracketMatch.index).replace(/^["']|["']$/g, '').trim() : '';
-    return { email, displayName };
-  })
-  .filter(entry => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(entry.email));
+const parseRecipientAddressList = (value?: string) => parseRecipientTokens(String(value || ''))
+  .map(({ email, displayName }) => ({ email, displayName }));
 const MAIL_DATE_FORMAT_OPTIONS = [
   { value: 'dd.MM.yyyy', de: '04.07.2026', en: '04.07.2026' },
   { value: 'dd.MM.yyyy HH:mm', de: '04.07.2026 13:24', en: '04.07.2026 13:24' },
@@ -129,6 +152,7 @@ export default function App() {
   const backgroundJobsRef = useRef<BackgroundJob[]>([]);
   const backgroundWorkerRunningRef = useRef(false);
   const backgroundJobSequenceRef = useRef(0);
+  const sendQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
     const persist = () => (window as any).uniqueMailNative?.persistRendererStorage?.();
@@ -221,6 +245,12 @@ export default function App() {
       processBackgroundJobs();
     })
   );
+
+  const enqueueSendJob = <T,>(task: () => Promise<T>): Promise<T> => {
+    const queued = sendQueueRef.current.catch(() => undefined).then(task);
+    sendQueueRef.current = queued.catch(() => undefined);
+    return queued;
+  };
 
   const normalizeProviderDomain = (domain: string) => {
     const normalized = domain.trim().toLowerCase();
@@ -1048,7 +1078,7 @@ exit`;
   const normalizeImportedAccounts = (value: unknown) => Array.isArray(value)
     ? value
         .filter((item: any) => item && typeof item.email === 'string')
-        .map((item: any) => ({
+        .map((item: any) => migrateLegacyAccountEndpoints({
           email: String(item.email || '').trim(),
           imapServer: String(item.imapServer || ''),
           imapPort: Number(item.imapPort) || 993,
@@ -1587,7 +1617,7 @@ exit`;
 
   const [accounts, setAccounts] = useState<any[]>(() => {
     const saved = readJsonStorage<any[]>('outlook_accounts', []);
-    return Array.isArray(saved) ? saved : [];
+    return Array.isArray(saved) ? saved.map(migrateLegacyAccountEndpoints) : [];
   });
 
   const [accountSessionPasswords, setAccountSessionPasswords] = useState<Record<string, string>>({});
@@ -2449,7 +2479,7 @@ Julia`,
     setSyncStatusText('E-Mail wurde in den Postausgang gelegt. Versand läuft im Hintergrund...');
     rememberMessageRecipients(message);
 
-    void enqueueBackgroundJob(`send:${queuedId}`, 90, async () => {
+    void enqueueSendJob(async () => {
       const failQueuedMail = (errorMessage: string) => {
         setEmails(prev => prev.map(mail => mail.id === queuedId
           ? { ...mail, sendStatus: 'failed' as const, sendError: errorMessage, category: 'Postausgang' }
@@ -2506,9 +2536,9 @@ Julia`,
         setEmails(prev => [sentMail, ...prev.filter(mail => mail.id !== queuedId && mail.id !== message.sourceId)]);
         setSelectedEmailId(prev => prev === queuedId ? sentMail.id : prev);
         setSelectedFolder(prev => prev === 'outbox' ? sentFolder : prev);
-        setSyncStatusText(data.sentAppend?.ok
-          ? `E-Mail im Hintergrund gesendet und in '${sentFolder}' abgelegt.`
-          : `E-Mail im Hintergrund gesendet. Lokale Kopie gespeichert${data.sentAppend?.error ? `; Server-Gesendet-Kopie fehlgeschlagen: ${data.sentAppend.error}` : '.'}`
+        setSyncStatusText(data.sentAppend?.pending
+          ? `SMTP-Server hat die E-Mail angenommen. Die Kopie für '${sentFolder}' wird im Hintergrund gespeichert.`
+          : `E-Mail im Hintergrund gesendet und lokal unter '${sentFolder}' abgelegt.`
         );
         triggerPostActionSync('Versand', [sentMail]);
       } catch (error: any) {
@@ -4058,6 +4088,7 @@ Julia`,
         onToggleSelectedPin={handleToggleSelectedPin}
         onToggleSelectedReadUnread={handleToggleSelectedReadUnread}
         onToggleSelectedFavorite={handleToggleSelectedFavorite}
+        onBlockSelectedSender={handleBlockSelectedSender}
         onResend={() => void handleResendEmail()}
         canResendSelected={isSentMessage(selectedEmailForActions)}
         selectedEmailIsRead={selectedEmailForActions?.isRead ?? true}
