@@ -5,6 +5,7 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const path = require('path');
+const { printableEmailDocument } = require('./print-email-document.cjs');
 
 const DEFAULT_UPDATE_FEED_URL = 'https://github.com/rakneznar/Unique-Mail-OpenSource/releases/latest/download/latest.json';
 let PORT = 0;
@@ -667,6 +668,33 @@ function focusMainWindow() {
   mainWindow.focus();
 }
 
+async function createEmailPrintWindow(owner, documentHtml) {
+  const printDirectory = path.join(app.getPath('temp'), 'Unique Mail', 'Print');
+  await fs.promises.mkdir(printDirectory, { recursive: true });
+  const filePath = path.join(printDirectory, `email-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.html`);
+  await fs.promises.writeFile(filePath, documentHtml, 'utf8');
+  const printWindow = new BrowserWindow({
+    show: false,
+    parent: owner || undefined,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      javascript: false
+    }
+  });
+  printWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  try {
+    await printWindow.loadFile(filePath);
+    printWindow.webContents.on('will-navigate', event => event.preventDefault());
+    return { printWindow, filePath };
+  } catch (error) {
+    if (!printWindow.isDestroyed()) printWindow.destroy();
+    await fs.promises.rm(filePath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 function forwardDetachedComposeToMain(channel, payload) {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return false;
   mainWindow.webContents.send(channel, payload);
@@ -1071,7 +1099,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.4.55 <span class="unique-version-current">aktuell</span></h3><ul><li>Die Nachrichtenliste zeigt fuer Absender beziehungsweise Empfaenger kompakte, lokal erzeugte Kontaktavatare mit gut unterscheidbaren Farben und Initialen.</li><li>Nachrichten werden automatisch in Heute, Gestern, Vorgestern, Letzte Woche, Vor zwei Wochen und Aelter gruppiert.</li><li>Dezente Trennlinien verbessern die Orientierung; die gemischte Virtualisierung beruecksichtigt eigene Hoehen fuer Gruppen und Nachrichten und bleibt auch bei grossen Postfaechern schnell.</li><li>Datumsgruppen und Avatare funktionieren im hellen und dunklen Modus sowie im gemeinsamen Posteingang und in Gesendet.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.56 <span class="unique-version-current">aktuell</span></h3><ul><li>Die ausgewaehlte E-Mail kann ueber das Ribbon oder ihr Rechtsklickmenue gedruckt beziehungsweise als PDF gespeichert werden.</li><li>Ein nativer Auswahldialog fuehrt wahlweise zum Windows-Druckdialog oder zum Speichern einer PDF-Datei im gewuenschten Ordner.</li><li>Die Ausgabe enthaelt Absender, Empfaenger, Datum, Anlagenliste und den vollstaendigen lokal gespeicherten oder zuvor vom IMAP-Server geladenen Nachrichteninhalt.</li><li>Plaintext-Nachrichten mit Adressen in spitzen Klammern werden nicht mehr faelschlich als HTML erkannt; Absaetze und Zeilenumbrueche bleiben im Lesebereich und in PDFs erhalten.</li><li>Die Druckansicht wird isoliert ohne Skripte und externe Inhalte erzeugt und nach Abschluss automatisch bereinigt.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.55</h3><ul><li>Die Nachrichtenliste zeigt fuer Absender beziehungsweise Empfaenger kompakte, lokal erzeugte Kontaktavatare mit gut unterscheidbaren Farben und Initialen.</li><li>Nachrichten werden automatisch in Heute, Gestern, Vorgestern, Letzte Woche, Vor zwei Wochen und Aelter gruppiert.</li><li>Dezente Trennlinien verbessern die Orientierung; die gemischte Virtualisierung beruecksichtigt eigene Hoehen fuer Gruppen und Nachrichten und bleibt auch bei grossen Postfaechern schnell.</li><li>Datumsgruppen und Avatare funktionieren im hellen und dunklen Modus sowie im gemeinsamen Posteingang und in Gesendet.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.54</h3><ul><li>Absender sperren ist im Ribbon wieder vollstaendig verdrahtet und verschiebt alle bereits geladenen Nachrichten desselben Absenders in den kontospezifischen Spam-/Junk-Ordner.</li><li>An, CC und BCC zeigen bestaetigte Empfaenger als Outlook-aehnliche Chips ohne sichtbare Trennzeichen; Enter, Tab, Komma, Semikolon, Einfuegen und Kontaktvorschlaege werden unterstuetzt.</li><li>SMTP-Versand besitzt eine eigene Warteschlange und wird nicht mehr von langen IMAP-Vollsyncs blockiert; die Gesendet-Kopie wird nach erfolgreicher Annahme im Hintergrund gespeichert.</li><li>Veraltete Serverdaten fuer inbox.lv und mail.de werden automatisch auf die erreichbaren IMAP-/SMTP-Endpunkte migriert.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.53</h3><ul><li>Das Rechtsklickmenue eines Ordners kann direkt einen neuen Unterordner auf dem IMAP-Server erstellen.</li><li>Benutzerdefinierte Ordner koennen samt Unterordnerstruktur umbenannt werden; lokale Nachrichten, Cachepfade, Favoriten und Serverabonnements werden mitgefuehrt.</li><li>Benutzerdefinierte Ordner koennen nach einer deutlichen Sicherheitsabfrage samt Unterordnern und Nachrichten geloescht werden.</li><li>Standard- und Systemordner bleiben geschuetzt; der alte fest eingebaute Entwicklerschluessel wurde entfernt und durch das persoenliche App-Passwort ersetzt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.52</h3><ul><li>Einzelne oder mehrfach markierte Nachrichten koennen per Drag-and-drop als echte EML-Anhaenge in neue Nachrichten gezogen werden.</li><li>Die EML-Datei enthaelt Absender, Empfaenger, CC, BCC, Betreff, Datum, HTML- oder Textinhalt und bereits geladene Originalanlagen.</li><li>Die Funktion steht im angedockten und abgekoppelten Verfassenfenster zur Verfuegung; externe EML-Dateien bleiben ebenfalls als normale Anlagen erlaubt.</li><li>Das bestehende Verschieben von Nachrichten in Mailordner funktioniert weiterhin parallel.</li></ul></article>',
@@ -1217,7 +1246,7 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.55',
+        '0.4.56',
         () => {
           const backdrop = ensureVersionHistoryDialog();
           backdrop.setAttribute('data-open', 'true');
@@ -1546,6 +1575,66 @@ ipcMain.handle('native:open-attachment', async (_event, payload) => {
   } catch (error) {
     log(`attachment default-app open failed: ${error.message || String(error)}`);
     return { ok: false, error: error.message || String(error) };
+  }
+});
+
+ipcMain.handle('native:print-email', async (event, payload) => {
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  let printWindow;
+  let temporaryFile;
+  try {
+    const choiceOptions = {
+      type: 'question',
+      title: 'E-Mail ausgeben',
+      message: 'Wie möchten Sie die ausgewählte E-Mail ausgeben?',
+      detail: 'Drucken öffnet den Windows-Druckdialog. Der PDF-Export speichert direkt eine PDF-Datei.',
+      buttons: ['Drucken...', 'Als PDF speichern...', 'Abbrechen'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true
+    };
+    const choice = owner
+      ? await dialog.showMessageBox(owner, choiceOptions)
+      : await dialog.showMessageBox(choiceOptions);
+    if (choice.response === 2) return { ok: false, canceled: true };
+
+    const prepared = await createEmailPrintWindow(owner, printableEmailDocument(payload));
+    printWindow = prepared.printWindow;
+    temporaryFile = prepared.filePath;
+
+    if (choice.response === 1) {
+      const pdfBaseName = sanitizeDownloadFilename(payload?.subject || 'E-Mail').replace(/\.pdf$/i, '').slice(0, 120) || 'E-Mail';
+      const saveOptions = {
+        title: 'E-Mail als PDF speichern',
+        defaultPath: path.join(app.getPath('downloads'), `${pdfBaseName}.pdf`),
+        filters: [{ name: 'PDF-Dokument', extensions: ['pdf'] }]
+      };
+      const saveResult = owner
+        ? await dialog.showSaveDialog(owner, saveOptions)
+        : await dialog.showSaveDialog(saveOptions);
+      if (saveResult.canceled || !saveResult.filePath) return { ok: false, canceled: true };
+      const pdfPath = saveResult.filePath.toLowerCase().endsWith('.pdf')
+        ? saveResult.filePath
+        : `${saveResult.filePath}.pdf`;
+      const pdf = await printWindow.webContents.printToPDF({ printBackground: true, pageSize: 'A4', preferCSSPageSize: true });
+      await fs.promises.writeFile(pdfPath, pdf);
+      return { ok: true, mode: 'pdf', filePath: pdfPath };
+    }
+
+    const printResult = await new Promise(resolve => {
+      printWindow.webContents.print({ silent: false, printBackground: true, usePrinterDefaultPageSize: true }, (success, failureReason) => {
+        if (success) resolve({ ok: true, mode: 'print' });
+        else if (/cancel/i.test(String(failureReason || ''))) resolve({ ok: false, canceled: true });
+        else resolve({ ok: false, error: failureReason || 'Druckauftrag konnte nicht gestartet werden.' });
+      });
+    });
+    return printResult;
+  } catch (error) {
+    log(`email print failed: ${error.message || String(error)}`);
+    return { ok: false, error: error.message || String(error) };
+  } finally {
+    if (printWindow && !printWindow.isDestroyed()) printWindow.destroy();
+    if (temporaryFile) await fs.promises.rm(temporaryFile, { force: true }).catch(() => {});
   }
 });
 

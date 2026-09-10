@@ -13,6 +13,7 @@ import { Email, Contact, Task, CalendarItem, CalendarItemDraft, KnownRecipient }
 import { useComposePastePrompt } from './ComposePastePrompt';
 import { readEmlAttachmentsFromDrop } from '../utils/eml';
 import RecipientChipInput from './RecipientChipInput';
+import { looksLikeHtmlMailBody } from '../utils/mailBody';
 
 export interface ComposeAttachmentPayload {
   filename: string;
@@ -315,7 +316,7 @@ export default function ReadingPane({
   const rawEmailBodyForDisplay = activeEmail && mailHasRemoteImages && !shouldRenderRemoteImages
     ? maskRemoteImages(activeEmail.body || '')
     : (activeEmail?.body || immediateBodyFallback);
-  const rawEmailBodyLooksHtml = /^\\s*</.test(rawEmailBodyForDisplay) || /<[a-z][\\s\\S]*>/i.test(rawEmailBodyForDisplay);
+  const rawEmailBodyLooksHtml = looksLikeHtmlMailBody(rawEmailBodyForDisplay);
   const activeEmailBodyForDisplay = React.useMemo(() => rawEmailBodyLooksHtml
     ? sanitizeMailHtml(rawEmailBodyForDisplay)
     : rawEmailBodyForDisplay, [rawEmailBodyForDisplay, rawEmailBodyLooksHtml]);
@@ -1042,8 +1043,7 @@ a{color:#0078d4;cursor:pointer}
 
   // Helper detect HTML mail content
   const isHtml = (text: string) => {
-    const trimmed = (text || '').trim();
-    return trimmed.startsWith('<') || /<[a-z][\s\S]*>/i.test(trimmed);
+    return looksLikeHtmlMailBody(text);
   };
 
   // --- 1. NEW EMAIL WRITING PANEL ---

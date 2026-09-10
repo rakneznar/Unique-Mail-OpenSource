@@ -10,7 +10,7 @@ import {
   Mail, MailOpen, Trash2, Archive, Reply, ReplyAll, Forward, Search, 
   RefreshCw, Wifi, WifiOff, FolderPlus, FolderOpen, 
   Plus, Settings, Layers, Milestone, Code, Cpu, ShieldAlert, Tag, Flag, Users, Undo2, Globe,
-  Sun, Moon, Zap, Pin, Star, Repeat2
+  Sun, Moon, Zap, Pin, Star, Repeat2, Printer
 } from 'lucide-react';
 
 interface RibbonProps {
@@ -29,6 +29,7 @@ interface RibbonProps {
   onToggleSelectedReadUnread?: () => void;
   onToggleSelectedFavorite?: () => void;
   onBlockSelectedSender?: () => void;
+  onPrintSelectedEmail?: () => void;
   selectedEmailIsRead?: boolean;
   selectedEmailIsPinned?: boolean;
   selectedEmailIsFavorite?: boolean;
@@ -77,6 +78,7 @@ export default function Ribbon({
   onToggleSelectedReadUnread,
   onToggleSelectedFavorite,
   onBlockSelectedSender,
+  onPrintSelectedEmail,
   selectedEmailIsRead = true,
   selectedEmailIsPinned = false,
   selectedEmailIsFavorite = false,
@@ -129,6 +131,7 @@ export default function Ribbon({
     favorite: language === 'en' ? 'Favorite' : 'Favorit',
     delete: language === 'en' ? 'Delete' : 'Löschen',
     blockSender: language === 'en' ? 'Block sender' : 'Absender sperren',
+    printPdf: language === 'en' ? 'Print / PDF' : 'Drucken / PDF',
     message: language === 'en' ? 'Message' : 'Nachricht',
     archive: language === 'en' ? 'Archive' : 'Archivieren',
     report: language === 'en' ? 'Report' : 'Melden',
@@ -421,6 +424,19 @@ export default function Ribbon({
                 >
                   <ShieldAlert className="w-4.5 h-4.5 mb-0.5 text-red-600" />
                   <span className="text-[10px] text-center font-bold leading-3">{ribbonText.blockSender}</span>
+                </button>
+                <button
+                  onClick={onPrintSelectedEmail}
+                  disabled={!selectedEmailId || currentPage !== 'mail'}
+                  className={`flex h-14 w-18 flex-col items-center justify-center border border-transparent p-1 transition-all ${
+                    selectedEmailId && currentPage === 'mail'
+                      ? 'cursor-pointer text-slate-800 hover:border-blue-100 hover:bg-blue-50 hover:shadow-xs active:scale-95'
+                      : 'cursor-not-allowed text-slate-400 opacity-35'
+                  }`}
+                  title="Ausgewählte E-Mail drucken oder als PDF speichern"
+                >
+                  <Printer className="mb-0.5 h-4.5 w-4.5 text-[#0078d4]" />
+                  <span className="text-center text-[10px] font-bold leading-3">{ribbonText.printPdf}</span>
                 </button>
                 <button 
                   onClick={onArchiveMail}

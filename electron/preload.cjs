@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('uniqueMailNative', {
   saveAttachments: (payload) => ipcRenderer.invoke('native:save-attachments', payload),
   prepareAttachmentDrag: (payload) => ipcRenderer.invoke('native:prepare-attachment-drag', payload),
   openAttachment: (payload) => ipcRenderer.invoke('native:open-attachment', payload),
+  printEmail: (payload) => ipcRenderer.invoke('native:print-email', payload),
   startAttachmentDrag: (payload) => ipcRenderer.send('native:start-attachment-drag', payload),
   onAttachmentDragError: (callback) => {
     if (typeof callback !== 'function') return () => {};

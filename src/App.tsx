@@ -17,9 +17,10 @@ import NotesView from './components/NotesView';
 import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, KnownRecipient } from './types';
 import AppLogo from './components/AppLogo';
 import { parseRecipientTokens } from './utils/recipients';
+import { looksLikeHtmlMailBody } from './utils/mailBody';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.55';
+const APP_VERSION = '0.4.56';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -137,6 +138,31 @@ const sanitizeRecipientHistory = (value: unknown): KnownRecipient[] => {
 
 const parseRecipientAddressList = (value?: string) => parseRecipientTokens(String(value || ''))
   .map(({ email, displayName }) => ({ email, displayName }));
+
+const escapePrintableText = (value: string) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
+
+const sanitizePrintableMailHtml = (value: string) => {
+  const source = String(value || '');
+  if (!looksLikeHtmlMailBody(source)) return `<pre>${escapePrintableText(source)}</pre>`;
+  const parsed = new DOMParser().parseFromString(source, 'text/html');
+  parsed.querySelectorAll('script, style, link, meta, base, iframe, object, embed, form, input, button, textarea, select').forEach(element => element.remove());
+  parsed.querySelectorAll('*').forEach(element => {
+    Array.from(element.attributes).forEach(attribute => {
+      const name = attribute.name.toLowerCase();
+      const attributeValue = attribute.value.trim();
+      if (name.startsWith('on') || name === 'srcdoc' || name === 'formaction') element.removeAttribute(attribute.name);
+      if ((name === 'href' || name === 'src') && /^javascript:/i.test(attributeValue)) element.removeAttribute(attribute.name);
+      if (name === 'srcset') element.removeAttribute(attribute.name);
+    });
+    if (element instanceof HTMLImageElement && /^https?:|^cid:/i.test(element.src)) {
+      element.removeAttribute('src');
+    }
+  });
+  return parsed.body.innerHTML;
+};
 const MAIL_DATE_FORMAT_OPTIONS = [
   { value: 'dd.MM.yyyy', de: '04.07.2026', en: '04.07.2026' },
   { value: 'dd.MM.yyyy HH:mm', de: '04.07.2026 13:24', en: '04.07.2026 13:24' },
@@ -3175,6 +3201,50 @@ Julia`,
     setSyncStatusText('Gesendete Nachricht wurde als bearbeitbare 1:1-Kopie geöffnet.');
   };
 
+  const handlePrintEmail = async (emailId = selectedEmailId || '') => {
+    const selectedMail = emails.find(mail => mail.id === emailId);
+    if (!selectedMail) {
+      setSyncStatusText('Bitte zuerst eine E-Mail zum Drucken auswählen.');
+      return;
+    }
+
+    let sourceMail = selectedMail;
+    if (mailBodyNeedsLoading(selectedMail)) {
+      setSyncStatusText('Vollständige E-Mail wird für die Druckausgabe geladen...');
+      const loadedMail = await loadMessageBody(selectedMail, 110, true);
+      if (loadedMail) sourceMail = { ...selectedMail, ...loadedMail, bodyLoaded: true };
+    }
+    if (!sourceMail.body && sourceMail.imapUid) {
+      setSyncStatusText('Die vollständige E-Mail konnte nicht geladen werden.');
+      alert('Die E-Mail kann erst gedruckt werden, wenn ihr vollständiger Inhalt lokal oder vom Mailserver geladen wurde.');
+      return;
+    }
+
+    const sender = sourceMail.senderEmail && !String(sourceMail.sender || '').includes(sourceMail.senderEmail)
+      ? `${sourceMail.sender || sourceMail.senderEmail} <${sourceMail.senderEmail}>`
+      : sourceMail.sender || sourceMail.senderEmail;
+    const result = await (window as any).uniqueMailNative?.printEmail?.({
+      subject: sourceMail.subject || '(Kein Betreff)',
+      from: sender,
+      to: sourceMail.recipientEmail || '',
+      cc: sourceMail.ccEmail || '',
+      bcc: sourceMail.bccEmail || '',
+      date: new Date(sourceMail.date).toLocaleString(uiLanguage === 'en' ? 'en-US' : 'de-DE'),
+      bodyHtml: sanitizePrintableMailHtml(sourceMail.body || sourceMail.preview || ''),
+      attachments: (sourceMail.attachments || sourceMail.draftAttachments || []).map(attachment => attachment.filename)
+    });
+    if (!result) {
+      setSyncStatusText('Drucken ist nur in der installierten Desktop-App verfügbar.');
+    } else if (result.ok && result.mode === 'pdf') {
+      setSyncStatusText(`E-Mail wurde als PDF gespeichert: ${result.filePath}`);
+    } else if (result.ok) {
+      setSyncStatusText('E-Mail wurde an den Windows-Druckdialog übergeben.');
+    } else if (!result.canceled) {
+      setSyncStatusText(`Drucken fehlgeschlagen: ${result.error || 'Unbekannter Fehler'}`);
+      alert(result.error || 'Die E-Mail konnte nicht gedruckt werden.');
+    }
+  };
+
   useEffect(() => {
     const selectedMail = emails.find(mail => mail.id === selectedEmailId);
     if (!selectedMail || !mailBodyNeedsLoading(selectedMail)) return;
@@ -4089,6 +4159,7 @@ Julia`,
         onToggleSelectedReadUnread={handleToggleSelectedReadUnread}
         onToggleSelectedFavorite={handleToggleSelectedFavorite}
         onBlockSelectedSender={handleBlockSelectedSender}
+        onPrintSelectedEmail={() => void handlePrintEmail()}
         onResend={() => void handleResendEmail()}
         canResendSelected={isSentMessage(selectedEmailForActions)}
         selectedEmailIsRead={selectedEmailForActions?.isRead ?? true}
@@ -4372,6 +4443,7 @@ Julia`,
               onReplyAll={handleReplyAll}
               onForwardMail={handleForward}
               onResendEmail={(id) => void handleResendEmail(id)}
+              onPrintEmail={(id) => void handlePrintEmail(id)}
               onDeleteMail={handleDeleteMail}
               onArchiveMail={handleArchiveMail}
               onReportPhishing={handleReportPhishing}

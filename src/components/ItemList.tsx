@@ -7,7 +7,7 @@ import React from 'react';
 import { 
   Paperclip, Flag, Mail, MailOpen, AlertCircle, Search, UserCheck, 
   Clock, CheckSquare, Square, CalendarDays, SignalHigh, Check, FileCode,
-  Pin, Star, Trash2, Plus, X
+  Pin, Star, Trash2, Plus, X, Printer
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, Category } from '../types';
 import { addEmailsToDragData } from '../utils/eml';
@@ -76,6 +76,7 @@ interface ItemListProps {
   onReplyAll?: () => void;
   onForwardMail?: () => void;
   onResendEmail?: (id: string) => void;
+  onPrintEmail?: (id: string) => void;
   onDeleteMail?: () => void;
   onArchiveMail?: () => void;
   onReportPhishing?: () => void;
@@ -121,6 +122,7 @@ export default function ItemList({
   onReplyAll,
   onForwardMail,
   onResendEmail,
+  onPrintEmail,
   onDeleteMail,
   onArchiveMail,
   onReportPhishing,
@@ -1070,6 +1072,14 @@ export default function ItemList({
               </button>
             ) : null;
           })()}
+          <button
+            id="ctx-print-email"
+            onClick={() => { onPrintEmail?.(contextMenu.emailId); setContextMenu(null); }}
+            className="flex w-full cursor-pointer items-center space-x-1.5 rounded-lg px-2.5 py-1.5 text-left text-[11px] font-bold text-slate-700 transition-all hover:bg-blue-50"
+          >
+            <Printer className="h-3.5 w-3.5 text-[#0078d4]" />
+            <span>Drucken / als PDF speichern...</span>
+          </button>
           
           <div className="h-px bg-slate-100 my-1"></div>
 
