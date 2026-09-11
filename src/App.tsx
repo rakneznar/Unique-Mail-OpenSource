@@ -20,7 +20,7 @@ import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.56';
+const APP_VERSION = '0.4.57';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -2500,8 +2500,7 @@ Julia`,
     };
 
     setEmails(prev => [baseMail, ...prev.filter(mail => mail.id !== queuedId && mail.id !== message.sourceId)]);
-    setSelectedFolder('outbox');
-    setSelectedEmailId(queuedId);
+    if (message.sourceId) setSelectedEmailId(previous => previous === message.sourceId ? null : previous);
     setSyncStatusText('E-Mail wurde in den Postausgang gelegt. Versand läuft im Hintergrund...');
     rememberMessageRecipients(message);
 
@@ -2560,8 +2559,6 @@ Julia`,
         };
 
         setEmails(prev => [sentMail, ...prev.filter(mail => mail.id !== queuedId && mail.id !== message.sourceId)]);
-        setSelectedEmailId(prev => prev === queuedId ? sentMail.id : prev);
-        setSelectedFolder(prev => prev === 'outbox' ? sentFolder : prev);
         setSyncStatusText(data.sentAppend?.pending
           ? `SMTP-Server hat die E-Mail angenommen. Die Kopie für '${sentFolder}' wird im Hintergrund gespeichert.`
           : `E-Mail im Hintergrund gesendet und lokal unter '${sentFolder}' abgelegt.`

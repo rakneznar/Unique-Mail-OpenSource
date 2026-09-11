@@ -563,6 +563,19 @@ a{color:#0078d4;cursor:pointer}
   const autoSaveGenerationRef = React.useRef(0);
   const composeInitializedRef = React.useRef(false);
 
+  const focusComposeEditorAtStart = React.useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+
   React.useEffect(() => {
     if (!previewAttachment) return;
     const handlePreviewKeyDown = (event: KeyboardEvent) => {
@@ -941,9 +954,12 @@ a{color:#0078d4;cursor:pointer}
           editorRef.current.innerHTML = initialComposeHtml;
         }
       }
-      window.requestAnimationFrame(() => { composeInitializedRef.current = true; });
+      window.requestAnimationFrame(() => {
+        focusComposeEditorAtStart();
+        composeInitializedRef.current = true;
+      });
     }
-  }, [isWritingEmail, selectedEmailId, composeMode, signatureActive, signatureText, defaultComposeAccountEmail, accountOptions.length]);
+  }, [isWritingEmail, selectedEmailId, composeMode, signatureActive, signatureText, defaultComposeAccountEmail, accountOptions.length, focusComposeEditorAtStart]);
 
   const buildComposePayload = React.useCallback(async (): Promise<ComposeMailPayload> => {
     const freshAttachments = await Promise.all(composeAttachments.map(fileToAttachmentPayload));

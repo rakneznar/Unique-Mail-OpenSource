@@ -83,7 +83,16 @@ export default function DetachedComposeWindow() {
 
   React.useEffect(() => {
     if (!loaded || !editorRef.current) return;
-    editorRef.current.innerHTML = payload.body || '';
+    const editor = editorRef.current;
+    editor.innerHTML = payload.body || '';
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
   }, [loaded]);
 
   React.useEffect(() => {

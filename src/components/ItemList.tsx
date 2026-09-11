@@ -31,6 +31,17 @@ export const mailDateGroup = (dateValue: string, now = new Date()): MailDateGrou
   return 'older';
 };
 
+export const sortEmailsForDisplay = (emails: Email[]) => [...emails].sort((a, b) => {
+  const pinA = a.isPinned ? 1 : 0;
+  const pinB = b.isPinned ? 1 : 0;
+  if (pinA !== pinB) return pinB - pinA;
+  if (pinA === 1) return new Date(b.date).getTime() - new Date(a.date).getTime();
+  const groupA = MAIL_DATE_GROUP_ORDER.indexOf(mailDateGroup(a.date));
+  const groupB = MAIL_DATE_GROUP_ORDER.indexOf(mailDateGroup(b.date));
+  if (groupA !== groupB) return groupA - groupB;
+  return new Date(b.date).getTime() - new Date(a.date).getTime();
+});
+
 const mailAvatar = (party: string, address: string) => {
   const cleanedParty = String(party || '').replace(/<[^>]+>/g, '').trim();
   const words = cleanedParty.split(/\s+/).filter(Boolean);
@@ -241,6 +252,7 @@ export default function ItemList({
     active: language === 'en' ? 'Active' : 'Aktiv',
     unread: language === 'en' ? 'Unread' : 'Ungelesen',
     favorites: language === 'en' ? 'Favorites' : 'Favoriten',
+    pinned: language === 'en' ? 'Pinned' : 'Angepinnt',
     dateGroups: {
       today: language === 'en' ? 'Today' : 'Heute',
       yesterday: language === 'en' ? 'Yesterday' : 'Gestern',
@@ -415,18 +427,7 @@ export default function ItemList({
             );
           }
 
-          // Date groups remain chronological; pinned messages stay first inside their own group.
-          const sortedEmails = [...filteredEmails].sort((a, b) => {
-            const groupA = MAIL_DATE_GROUP_ORDER.indexOf(mailDateGroup(a.date));
-            const groupB = MAIL_DATE_GROUP_ORDER.indexOf(mailDateGroup(b.date));
-            if (groupA !== groupB) return groupA - groupB;
-            const pinA = a.isPinned ? 1 : 0;
-            const pinB = b.isPinned ? 1 : 0;
-            if (pinA !== pinB) {
-              return pinB - pinA;
-            }
-            return new Date(b.date).getTime() - new Date(a.date).getTime();
-          });
+          const sortedEmails = sortEmailsForDisplay(filteredEmails);
 
           const selectByIndex = (index: number, extend: boolean) => {
             const clamped = Math.max(0, Math.min(sortedEmails.length - 1, index));
@@ -449,11 +450,16 @@ export default function ItemList({
           const virtualRowHeight = isDense ? 82 : 88;
           const groupRowHeight = 34;
           const groupedRows: Array<{ type: 'group'; key: string; label: string; height: number } | { type: 'email'; key: string; email: Email; height: number }> = [];
-          let previousGroup: MailDateGroup | null = null;
+          let previousGroup: MailDateGroup | 'pinned' | null = null;
           sortedEmails.forEach(email => {
-            const group = mailDateGroup(email.date);
+            const group = email.isPinned ? 'pinned' : mailDateGroup(email.date);
             if (group !== previousGroup) {
-              groupedRows.push({ type: 'group', key: `group-${group}`, label: uiText.dateGroups[group], height: groupRowHeight });
+              groupedRows.push({
+                type: 'group',
+                key: `group-${group}`,
+                label: group === 'pinned' ? uiText.pinned : uiText.dateGroups[group],
+                height: groupRowHeight
+              });
               previousGroup = group;
             }
             groupedRows.push({ type: 'email', key: email.id, email, height: virtualRowHeight });
