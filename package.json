@@ -1,7 +1,16 @@
 {
   "name": "unique-mail",
   "private": true,
-  "version": "0.4.57",
+  "version": "0.4.58",
+  "description": "Local-first desktop mail client with IMAP/SMTP synchronization for Windows.",
+  "author": "PACOPAR",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rakneznar/Unique-Mail-OpenSource.git"
+  },
+  "homepage": "https://github.com/rakneznar/Unique-Mail-OpenSource",
+  "bugs": "https://github.com/rakneznar/Unique-Mail-OpenSource/issues",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -13,6 +22,7 @@
     "preview": "vite preview",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); require('fs').rmSync('server.js',{force:true})\"",
     "lint": "tsc --noEmit",
+    "notices": "node scripts/generate-third-party-notices.cjs",
     "dist:portable": "npm run build && electron-builder --win portable",
     "dist:all": "npm run build && electron-builder --win nsis portable"
   },
@@ -26,6 +36,9 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "LICENSE",
+      "PRIVACY.md",
+      "THIRD_PARTY_NOTICES.txt",
       "package.json"
     ],
     "win": {

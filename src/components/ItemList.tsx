@@ -152,7 +152,7 @@ export default function ItemList({
 }: ItemListProps) {
   const [contextMenu, setContextMenu] = React.useState<{ x: number; y: number; emailId: string } | null>(null);
   const [newContactGroupLabel, setNewContactGroupLabel] = React.useState('');
-  const [activeFilterTab, setActiveFilterTab] = React.useState<'all' | 'unread' | 'favorites'>('all');
+  const [activeFilterTab, setActiveFilterTab] = React.useState<'all' | 'unread' | 'favorites' | 'attachments'>('all');
   const [selectedEmailIds, setSelectedEmailIds] = React.useState<string[]>([]);
   const [selectionAnchorId, setSelectionAnchorId] = React.useState<string | null>(null);
   const [mailListMetrics, setMailListMetrics] = React.useState({ scrollTop: 0, viewportHeight: 600 });
@@ -252,6 +252,7 @@ export default function ItemList({
     active: language === 'en' ? 'Active' : 'Aktiv',
     unread: language === 'en' ? 'Unread' : 'Ungelesen',
     favorites: language === 'en' ? 'Favorites' : 'Favoriten',
+    attachments: language === 'en' ? 'Attachments' : 'Mit Anlagen',
     pinned: language === 'en' ? 'Pinned' : 'Angepinnt',
     dateGroups: {
       today: language === 'en' ? 'Today' : 'Heute',
@@ -341,6 +342,24 @@ export default function ItemList({
           {currentPage === 'mail' && (
             <button
               onClick={() => {
+                setActiveFilterTab('attachments');
+                setFilterUnreadOnly(false);
+              }}
+              className={`cursor-pointer font-bold tracking-wide uppercase text-[10px] transition-all flex items-center gap-1 select-none whitespace-nowrap px-2.5 py-1 rounded-md outline-none focus:outline-none ${
+                activeFilterTab === 'attachments'
+                  ? 'text-[#0078d4] bg-[#0078d4]/10 dark:bg-[#0078d4]/20 font-extrabold shadow-sm'
+                  : 'text-slate-500 hover:text-[#0078d4] dark:text-slate-400 dark:hover:text-blue-400 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
+              }`}
+              title={language === 'en' ? 'Show only e-mails with attachments' : 'Nur E-Mails mit Anlagen anzeigen'}
+            >
+              <Paperclip className="h-3 w-3 shrink-0" />
+              <span>{uiText.attachments}</span>
+            </button>
+          )}
+
+          {currentPage === 'mail' && (
+            <button
+              onClick={() => {
                 setActiveFilterTab('favorites');
                 setFilterUnreadOnly(false);
               }}
@@ -368,8 +387,10 @@ export default function ItemList({
         {currentPage === 'mail' && (() => {
           // Helper for Outlook Classic attachment full text scanning
           const getAttachmentSearchContent = (email: Email) => {
-            if (!email.hasAttachment) return "";
-            return "wpf_layout_concept.pdf Dieser Anhang spezifiziert das WPF MVVM Design-System und das SQLite Repository Schema für Unique Mail. .NET 8 MailKit und Entity Framework Core Synchronisations-Engine. Autor: Dr. Andreas Müller. Thread-Sicherheit MailKit-Instanzen";
+            return [...(email.attachments || []), ...(email.draftAttachments || [])]
+              .map(attachment => attachment.filename || '')
+              .filter(Boolean)
+              .join(' ');
           };
 
           const normalizeFolderKey = (value?: string) => (value || 'inbox').trim().replace(/\\/g, '/').toLowerCase();
@@ -400,10 +421,13 @@ export default function ItemList({
               const activeAccount = activeAccountEmail.toLowerCase();
               return (!activeAccount || emailAccount === activeAccount) && folderMatches(e.imapFolder || e.folder, selectedFolder);
             })
-            // Support 3-state filter selection (All, Unread, Favorites)
+            // Mail filters can be combined with the full-text search below.
             .filter(e => {
               if (activeFilterTab === 'unread') return !e.isRead;
               if (activeFilterTab === 'favorites') return !!e.isFavorite;
+              if (activeFilterTab === 'attachments') {
+                return !!e.hasAttachment || (e.attachments?.length || 0) > 0 || (e.draftAttachments?.length || 0) > 0;
+              }
               return true;
             })
             // Outlook Classic high fidelity full text lookup including categories and attachments

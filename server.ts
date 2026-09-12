@@ -1160,6 +1160,46 @@ async function startServer() {
     }
   });
 
+  app.post("/api/mail/messages/flag-state", async (req, res) => {
+    const { email, password, imapServer, imapPort, folder, isFlagged } = req.body as MailActionRequest & { isFlagged?: boolean };
+    const uids = ensureUidList((req.body as MailActionRequest).uids);
+
+    if (!email || !password || !imapServer || !imapPort || !folder || uids.length === 0 || typeof isFlagged !== "boolean") {
+      return res.status(400).json({ error: "E-Mail, Passwort, IMAP-Daten, Ordner, UID-Liste und Nachverfolgungsstatus sind erforderlich." });
+    }
+
+    const client = createImapClient({ email, password, imapServer, imapPort });
+    let lock;
+    try {
+      await client.connect();
+      lock = await client.getMailboxLock(folder);
+      if (isFlagged) {
+        await client.messageFlagsAdd(uids, ["\\Flagged"], { uid: true });
+      } else {
+        await client.messageFlagsRemove(uids, ["\\Flagged"], { uid: true });
+      }
+
+      const cached = await readMailCache(email);
+      if (cached?.emails) {
+        cached.emails = cached.emails.map((mail: any) => {
+          const uid = getMailUid(mail);
+          return sameFolder(mail.folder || mail.imapFolder, folder) && uid && uids.includes(uid)
+            ? { ...mail, isFlagged }
+            : mail;
+        });
+        cached.syncedAt = new Date().toISOString();
+        await writeMailCache(email, cached);
+      }
+
+      res.json({ ok: true, updated: uids.length });
+    } catch (error: any) {
+      res.status(502).json({ error: error?.message || "Nachverfolgung konnte nicht zum IMAP-Server synchronisiert werden." });
+    } finally {
+      if (lock) lock.release();
+      await client.logout().catch(() => undefined);
+    }
+  });
+
   app.post("/api/mail/folders/move", async (req, res) => {
     const { email, password, imapServer, imapPort, sourceFolder, destinationFolder, mode } = req.body as FolderMoveRequest;
     if (!email || !password || !imapServer || !imapPort || !sourceFolder || !destinationFolder || !["nest", "merge"].includes(mode)) {

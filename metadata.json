@@ -1,6 +1,6 @@
 {
   "name": "Unique Mail",
-  "description": "Ein interaktiver high-fidelity Simulator für Outlook Classic mit einer integrierten Entwickler-Suite: Architektur-Pläne, 5-Phasen-Roadmap und sofort einsatzbereitem WPF/C# Code für Visual Studio.",
+  "description": "Lokaler Windows-E-Mail-Client mit IMAP/SMTP-Synchronisation, Offline-Cache, Kontakten, Kalender und Aufgaben.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -34,6 +34,20 @@ type BackgroundJob = {
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
 };
+type MailMutationType = 'read-state' | 'flag-state' | 'move-role' | 'move-folder';
+type PendingMailMutation = {
+  id: string;
+  type: MailMutationType;
+  targetEmails: Email[];
+  isRead?: boolean;
+  isFlagged?: boolean;
+  targetRole?: 'deleted' | 'archive' | 'junk';
+  destinationFolder?: string;
+  reason: string;
+  createdAt: string;
+  attempts: number;
+  lastError?: string;
+};
 
 const readJsonStorage = <T,>(key: string, fallback: T): T => {
   try {
@@ -77,6 +91,31 @@ const hashAppLockPassword = async (password: string, salt: string) => {
 const DEFAULT_CONTACT_SORT_LABELS = ['Newsletter', 'Privat', 'Beruflich'];
 const DEFAULT_MAIL_DATE_FORMAT = 'dd.MM.yyyy';
 const RECIPIENT_HISTORY_STORAGE_KEY = 'uniquemail_recipient_history';
+const PENDING_MAIL_MUTATIONS_STORAGE_KEY = 'uniquemail_pending_mail_mutations_v1';
+
+const compactMutationMail = (mail: Email): Email => ({
+  id: mail.id,
+  sender: mail.sender,
+  senderEmail: mail.senderEmail,
+  subject: mail.subject,
+  date: mail.date,
+  body: '',
+  preview: '',
+  isRead: mail.isRead,
+  isFlagged: mail.isFlagged,
+  hasAttachment: mail.hasAttachment,
+  importance: mail.importance,
+  category: mail.category,
+  folder: mail.folder,
+  accountEmail: mail.accountEmail,
+  imapFolder: mail.imapFolder,
+  imapUid: mail.imapUid,
+  imapUidValidity: mail.imapUidValidity
+});
+
+const readPendingMailMutations = () => readJsonStorage<PendingMailMutation[]>(PENDING_MAIL_MUTATIONS_STORAGE_KEY, [])
+  .filter(item => item && typeof item.id === 'string' && Array.isArray(item.targetEmails) && item.targetEmails.length > 0)
+  .slice(0, 1000);
 
 const isSentMessage = (mail?: Email | null) => {
   if (!mail) return false;
@@ -176,8 +215,11 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<AppPage>('mail');
   const [activeTab, setActiveTab] = useState<'start' | 'sync' | 'folder' | 'view' | 'dev' | 'options'>('start');
   const backgroundJobsRef = useRef<BackgroundJob[]>([]);
+  const backgroundJobPromisesRef = useRef<Map<string, Promise<unknown>>>(new Map());
   const backgroundWorkerRunningRef = useRef(false);
   const backgroundJobSequenceRef = useRef(0);
+  const pendingMailMutationsRef = useRef<PendingMailMutation[]>(readPendingMailMutations());
+  const mailMutationRetryTimerRef = useRef<number | null>(null);
   const sendQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
@@ -257,8 +299,10 @@ export default function App() {
     }, 0);
   };
 
-  const enqueueBackgroundJob = <T,>(key: string, priority: number, task: () => Promise<T>): Promise<T> => (
-    new Promise<T>((resolve, reject) => {
+  const enqueueBackgroundJob = <T,>(key: string, priority: number, task: () => Promise<T>): Promise<T> => {
+    const existing = backgroundJobPromisesRef.current.get(key);
+    if (existing) return existing as Promise<T>;
+    const queued = new Promise<T>((resolve, reject) => {
       backgroundJobSequenceRef.current += 1;
       backgroundJobsRef.current.push({
         id: backgroundJobSequenceRef.current,
@@ -269,8 +313,14 @@ export default function App() {
         reject
       });
       processBackgroundJobs();
-    })
-  );
+    });
+    backgroundJobPromisesRef.current.set(key, queued);
+    const clear = () => {
+      if (backgroundJobPromisesRef.current.get(key) === queued) backgroundJobPromisesRef.current.delete(key);
+    };
+    void queued.then(clear, clear);
+    return queued;
+  };
 
   const enqueueSendJob = <T,>(task: () => Promise<T>): Promise<T> => {
     const queued = sendQueueRef.current.catch(() => undefined).then(task);
@@ -2103,10 +2153,15 @@ exit`;
   const [syncProgress, setSyncProgress] = useState<number>(100);
   const [syncStatusText, setSyncStatusText] = useState<string>('Alle Ordner sind aktuell.');
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const isOfflineRef = useRef(isOffline);
   const postActionSyncInFlightRef = useRef(false);
   const postActionSyncQueuedRef = useRef(false);
   const postActionSyncTimerRef = useRef<number | null>(null);
   const lastPostActionSyncAtRef = useRef(0);
+
+  useEffect(() => {
+    isOfflineRef.current = isOffline;
+  }, [isOffline]);
 
   const normalizeMailFolderKey = (value?: string) => (value || 'inbox').trim().replace(/\\/g, '/').toLowerCase();
   const mailFolderMatches = (mailFolderRaw: string | undefined, selectedFolderRaw: string) => {
@@ -2134,19 +2189,7 @@ exit`;
     return syncedEmails.find(mail => mailFolderMatches(mail.imapFolder || mail.folder, folder))?.id || syncedEmails[0]?.id || null;
   };
 
-  // Sync animation simulation
-  const handleTriggerSync = async () => {
-    if (isOffline) {
-      alert("Synchronisation fehlgeschlagen: Sie arbeiten aktuell offline. Bitte deaktivieren Sie 'Offline arbeiten'.");
-      return;
-    }
-    if (isSyncing) return;
-
-    if (accounts.length === 0) {
-      alert("Bitte zuerst ein E-Mail-Konto hinzufügen.");
-      return;
-    }
-
+  const runManualFullSync = async () => {
     setIsSyncing(true);
     setSyncProgress(10);
     setSyncStatusText(`Synchronisiere alle Ordner in ${accounts.length} Konto/Konten...`);
@@ -2178,60 +2221,19 @@ exit`;
     } finally {
       setIsSyncing(false);
     }
-    return;
+  };
 
-    setIsSyncing(true);
-    setSyncProgress(10);
-    setSyncStatusText("Verbindung mit exchange.dev-core.local wird hergestellt...");
-
-    setTimeout(() => {
-      setSyncProgress(35);
-      setSyncStatusText("Ordnerstrukturen abgleichen (IMAP UIDVALIDITY)...");
-    }, 800);
-
-    setTimeout(() => {
-      setSyncProgress(70);
-      setSyncStatusText("Abrufen von neuen E-Mails ab höchster lokaler UID...");
-      
-      // Injecting a simulated incoming email about WPF performance as standard sync
-      const incomingMail: Email = {
-        id: `msg-${Date.now()}`,
-        sender: 'Julia Koch',
-        senderEmail: 'j.koch@performance.local',
-        subject: `Live-Sync: SQLite Schreibzugriff auf ${emails.length + 1} Elemente erhöht`,
-        date: new Date().toISOString(),
-        preview: 'Hi Team, der SQLite Index meldet optimalen Durchlauf. Delta-Sync wurde soeben abgeschlossen...',
-        body: `Hallo zusammen,
-
-der SQLite Index für die Volltextsuche meldet hervorragende Durchlaufwerte.
-
-Sämtliche synchronisierten E-Mails wurden atomar in die Tabelle geschrieben. Der Delta-Sync-Algorithmus hat nur die ausstehenden Nachrichtendatensätze heruntergeladen.
-
-WPF-seitig läuft das Rendering flüssig und die DataTemplates sind up to date.
-
-Beste Grüße,
-Julia`,
-        isRead: false,
-        isFlagged: false,
-        hasAttachment: false,
-        importance: 'normal',
-        category: 'Synchronisation'
-      };
-      
-      // Prepend to current emails list
-      // Demo sync disabled: real IMAP integration will populate this list.
-    }, 1600);
-
-    setTimeout(() => {
-      setSyncProgress(95);
-      setSyncStatusText("Sichern der lokalen SQLite Transaktionsprotokolle...");
-    }, 2400);
-
-    setTimeout(() => {
-      setSyncProgress(100);
-      setSyncStatusText("Alle Ordner sind aktuell. Synchronisierung erfolgreich abgeschlossen.");
-      setIsSyncing(false);
-    }, 3000);
+  const handleTriggerSync = () => {
+    if (isOffline) {
+      alert("Synchronisation fehlgeschlagen: Sie arbeiten aktuell offline. Bitte deaktivieren Sie 'Offline arbeiten'.");
+      return;
+    }
+    if (accounts.length === 0) {
+      alert("Bitte zuerst ein E-Mail-Konto hinzufügen.");
+      return;
+    }
+    setSyncStatusText('Vollsync wurde eingereiht. Ausstehende Benutzeraktionen werden zuerst verarbeitet.');
+    void enqueueBackgroundJob('manual-sync:all-folders', 60, runManualFullSync).catch(() => undefined);
   };
 
   // Toggle offline works instantly and sync indicators reacts
@@ -2656,7 +2658,12 @@ Julia`,
     const willBeFlagged = !currentMail.isFlagged;
     
     setEmails(prev => prev.map(e => e.id === selectedEmailId ? { ...e, isFlagged: willBeFlagged } : e));
-    triggerPostActionSync('Nachverfolgung geändert', [currentMail]);
+    enqueueMailMutation({
+      type: 'flag-state',
+      targetEmails: [currentMail],
+      isFlagged: willBeFlagged,
+      reason: 'Nachverfolgung ändern'
+    });
 
     if (willBeFlagged) {
       // Automatically trigger the Wiedervorlage / Erinnerung scheduler modal
@@ -2901,6 +2908,15 @@ Julia`,
       const incoming = incomingById.get(mail.id);
       if (!incoming) return mail;
       incomingById.delete(mail.id);
+      const pendingMutations = pendingMailMutationsRef.current.filter(mutation => mutation.targetEmails.some(target => {
+        if (target.id === mail.id) return true;
+        return (target.accountEmail || '').toLowerCase() === owner
+          && getMailUid(target) === getMailUid(mail)
+          && normalizeMailFolderKey(target.imapFolder || target.folder) === normalizeMailFolderKey(incoming.imapFolder || incoming.folder);
+      }));
+      const pendingReadState = [...pendingMutations].reverse().find(mutation => mutation.type === 'read-state');
+      const pendingFlagState = [...pendingMutations].reverse().find(mutation => mutation.type === 'flag-state');
+      const hasPendingMove = pendingMutations.some(mutation => mutation.type === 'move-role' || mutation.type === 'move-folder');
       const retainedContent = mail.bodyLoaded === true && !!mail.body
         ? {
             body: mail.body,
@@ -2914,6 +2930,9 @@ Julia`,
         ...mail,
         ...incoming,
         ...retainedContent,
+        ...(hasPendingMove ? { folder: mail.folder, imapFolder: mail.imapFolder } : {}),
+        ...(pendingReadState ? { isRead: pendingReadState.isRead } : {}),
+        ...(pendingFlagState ? { isFlagged: pendingFlagState.isFlagged } : {}),
         isPinned: mail.isPinned,
         isFavorite: mail.isFavorite,
         category: mail.category || incoming.category,
@@ -3406,10 +3425,9 @@ Julia`,
     }
 
     for (const group of groups.values()) {
-      const password = await getSessionPassword(group.account);
+      const password = await getStoredAccountPasswordNoPrompt(group.account);
       if (!password) {
-        setSyncStatusText('Lesestatus nur lokal geändert: Passwort wurde nicht eingegeben.');
-        continue;
+        throw new Error(`Gespeichertes Passwort für ${group.account.email} ist nicht verfügbar.`);
       }
       const response = await fetch('/api/mail/messages/read-state', {
         method: 'POST',
@@ -3446,10 +3464,9 @@ Julia`,
     }
 
     for (const group of groups.values()) {
-      const password = await getSessionPassword(group.account);
+      const password = await getStoredAccountPasswordNoPrompt(group.account);
       if (!password) {
-        setSyncStatusText('Verschieben nur lokal durchgeführt: Passwort wurde nicht eingegeben.');
-        continue;
+        throw new Error(`Gespeichertes Passwort für ${group.account.email} ist nicht verfügbar.`);
       }
       const response = await fetch('/api/mail/messages/move', {
         method: 'POST',
@@ -3475,8 +3492,7 @@ Julia`,
           const account = getAccountForMail(mail);
           const uid = getMailUid(mail);
           const mapped = uidMap.find((item: any) => Number(item.from) === uid);
-          const folder = mail.imapFolder || mail.folder || 'inbox';
-          if (!mapped || !account || account.email.toLowerCase() !== group.account.email.toLowerCase() || folder !== group.folder) return mail;
+          if (!mapped || !account || account.email.toLowerCase() !== group.account.email.toLowerCase()) return mail;
           const nextUid = Number(mapped.to);
           return {
             ...mail,
@@ -3504,10 +3520,9 @@ Julia`,
     }
 
     for (const group of groups.values()) {
-      const password = await getSessionPassword(group.account);
+      const password = await getStoredAccountPasswordNoPrompt(group.account);
       if (!password) {
-        setSyncStatusText('Verschieben nur lokal durchgeführt: Passwort wurde nicht eingegeben.');
-        continue;
+        throw new Error(`Gespeichertes Passwort für ${group.account.email} ist nicht verfügbar.`);
       }
       const response = await fetch('/api/mail/messages/move', {
         method: 'POST',
@@ -3533,8 +3548,7 @@ Julia`,
           const account = getAccountForMail(mail);
           const uid = getMailUid(mail);
           const mapped = uidMap.find((item: any) => Number(item.from) === uid);
-          const folder = mail.imapFolder || mail.folder || 'inbox';
-          if (!mapped || !account || account.email.toLowerCase() !== group.account.email.toLowerCase() || folder !== group.folder) return mail;
+          if (!mapped || !account || account.email.toLowerCase() !== group.account.email.toLowerCase()) return mail;
           const nextUid = Number(mapped.to);
           return {
             ...mail,
@@ -3547,6 +3561,121 @@ Julia`,
       }
     }
   };
+
+  const postFlagStateForEmails = async (targetEmails: Email[], isFlagged: boolean) => {
+    const groups = new Map<string, { account: any; folder: string; uids: number[] }>();
+    for (const mail of targetEmails) {
+      const account = getAccountForMail(mail);
+      const uid = getMailUid(mail);
+      const folder = mail.imapFolder || mail.folder || 'inbox';
+      if (!account || !uid || !folder) continue;
+      const key = `${account.email.toLowerCase()}::${folder}`;
+      const group = groups.get(key) || { account, folder, uids: [] };
+      group.uids.push(uid);
+      groups.set(key, group);
+    }
+
+    for (const group of groups.values()) {
+      const password = await getStoredAccountPasswordNoPrompt(group.account);
+      if (!password) throw new Error(`Gespeichertes Passwort für ${group.account.email} ist nicht verfügbar.`);
+      const response = await fetch('/api/mail/messages/flag-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: group.account.email,
+          password,
+          imapServer: group.account.imapServer,
+          imapPort: group.account.imapPort,
+          folder: group.folder,
+          uids: group.uids,
+          isFlagged
+        })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Nachverfolgung konnte nicht synchronisiert werden.');
+      }
+    }
+  };
+
+  const persistPendingMailMutations = () => {
+    localStorage.setItem(PENDING_MAIL_MUTATIONS_STORAGE_KEY, JSON.stringify(pendingMailMutationsRef.current));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+  };
+
+  const executePendingMailMutation = async (mutation: PendingMailMutation) => {
+    if (mutation.type === 'read-state' && typeof mutation.isRead === 'boolean') {
+      await postReadStateForEmails(mutation.targetEmails, mutation.isRead);
+      return;
+    }
+    if (mutation.type === 'flag-state' && typeof mutation.isFlagged === 'boolean') {
+      await postFlagStateForEmails(mutation.targetEmails, mutation.isFlagged);
+      return;
+    }
+    if (mutation.type === 'move-role' && mutation.targetRole) {
+      await postMoveForEmails(mutation.targetEmails, mutation.targetRole);
+      return;
+    }
+    if (mutation.type === 'move-folder' && mutation.destinationFolder) {
+      await postMoveForEmailsToFolder(mutation.targetEmails, mutation.destinationFolder);
+      return;
+    }
+    throw new Error('Unvollständige Mail-Aktion in der Synchronisationswarteschlange.');
+  };
+
+  const scheduleMailMutationDrain = () => {
+    if (isOfflineRef.current || pendingMailMutationsRef.current.length === 0) return;
+    void enqueueBackgroundJob('mail-mutation-drain', 100, drainPendingMailMutations).catch(() => undefined);
+  };
+
+  const drainPendingMailMutations = async () => {
+    if (isOfflineRef.current || pendingMailMutationsRef.current.length === 0) return;
+    let completed = 0;
+    while (!isOfflineRef.current && pendingMailMutationsRef.current.length > 0) {
+      const mutation = pendingMailMutationsRef.current[0];
+      setSyncStatusText(`${mutation.reason}: Serveränderung wird ausgeführt (${pendingMailMutationsRef.current.length} ausstehend)...`);
+      try {
+        await executePendingMailMutation(mutation);
+        pendingMailMutationsRef.current.shift();
+        persistPendingMailMutations();
+        completed += 1;
+      } catch (error: any) {
+        mutation.attempts += 1;
+        mutation.lastError = error?.message || String(error);
+        persistPendingMailMutations();
+        setSyncStatusText(`${mutation.reason} bleibt vorgemerkt: ${mutation.lastError}`);
+        if (mailMutationRetryTimerRef.current) window.clearTimeout(mailMutationRetryTimerRef.current);
+        const retryDelay = Math.min(120000, 5000 * Math.max(1, mutation.attempts));
+        mailMutationRetryTimerRef.current = window.setTimeout(() => {
+          mailMutationRetryTimerRef.current = null;
+          scheduleMailMutationDrain();
+        }, retryDelay);
+        throw error;
+      }
+    }
+    if (completed > 0) triggerPostActionSync(`${completed} Serveränderung(en)`);
+  };
+
+  const enqueueMailMutation = (mutation: Omit<PendingMailMutation, 'id' | 'createdAt' | 'attempts'>) => {
+    const targetEmails = mutation.targetEmails.map(compactMutationMail);
+    if (targetEmails.length === 0) return;
+    pendingMailMutationsRef.current.push({
+      ...mutation,
+      targetEmails,
+      id: `mail-action-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      createdAt: new Date().toISOString(),
+      attempts: 0
+    });
+    persistPendingMailMutations();
+    scheduleMailMutationDrain();
+  };
+
+  useEffect(() => {
+    if (!isOffline && accounts.length > 0 && pendingMailMutationsRef.current.length > 0) scheduleMailMutationDrain();
+    return () => {
+      if (mailMutationRetryTimerRef.current) window.clearTimeout(mailMutationRetryTimerRef.current);
+    };
+  }, [isOffline, accounts.length]);
 
   const moveFolderOnServer = async (request: {
     accountEmail: string;
@@ -3784,19 +3913,25 @@ Julia`,
     if (targetEmails.length === 0) return;
     setEmails(prev => prev.map(mail => ids.includes(mail.id) ? { ...mail, folder: destinationFolder, imapFolder: destinationFolder } : mail));
     setSelectedEmailId(null);
-    void enqueueBackgroundJob(`move-folder:${destinationFolder}:${ids.join(',')}`, 90, () => postMoveForEmailsToFolder(targetEmails, destinationFolder))
-      .then(() => setSyncStatusText(ids.length + ' E-Mail(s) nach ' + destinationFolder + ' verschoben und synchronisiert.'))
-      .catch((error) => setSyncStatusText('Verschieben lokal durchgeführt, Server-Sync fehlgeschlagen: ' + (error.message || error)))
-      .finally(() => triggerPostActionSync('Verschieben', targetEmails));
+    enqueueMailMutation({
+      type: 'move-folder',
+      targetEmails,
+      destinationFolder,
+      reason: `${ids.length} E-Mail(s) nach ${destinationFolder} verschieben`
+    });
+    setSyncStatusText(`${ids.length} E-Mail(s) lokal verschoben; Serveränderung wurde vorgemerkt.`);
   };
   const setEmailsReadState = (ids: string[], isRead: boolean) => {
     const targetEmails = emails.filter(mail => ids.includes(mail.id));
     if (targetEmails.length === 0) return;
     setEmails(prev => prev.map(mail => ids.includes(mail.id) ? { ...mail, isRead } : mail));
-    void enqueueBackgroundJob(`read-state:${isRead}:${ids.join(',')}`, 90, () => postReadStateForEmails(targetEmails, isRead))
-      .then(() => setSyncStatusText(`${ids.length} E-Mail(s) ${isRead ? 'als gelesen' : 'als ungelesen'} synchronisiert.`))
-      .catch((error) => setSyncStatusText(`Lesestatus lokal geändert, Server-Sync fehlgeschlagen: ${error.message || error}`))
-      .finally(() => triggerPostActionSync(isRead ? 'Als gelesen markieren' : 'Als ungelesen markieren', targetEmails));
+    enqueueMailMutation({
+      type: 'read-state',
+      targetEmails,
+      isRead,
+      reason: `${ids.length} E-Mail(s) ${isRead ? 'als gelesen' : 'als ungelesen'} markieren`
+    });
+    setSyncStatusText(`Lesestatus lokal geändert; Serveränderung wurde vorgemerkt.`);
   };
 
   const moveEmailsToFolder = (ids: string[], targetRole: 'deleted' | 'archive' | 'junk') => {
@@ -3809,10 +3944,14 @@ Julia`,
       return { ...mail, folder: localTarget, imapFolder: localTarget };
     }));
     setSelectedEmailId(null);
-    void enqueueBackgroundJob(`move-role:${targetRole}:${ids.join(',')}`, 90, () => postMoveForEmails(targetEmails, targetRole))
-      .then(() => setSyncStatusText(`${ids.length} E-Mail(s) nach ${targetRole === 'deleted' ? 'Papierkorb' : targetRole === 'junk' ? 'Spam/Junk' : 'Archiv'} verschoben und synchronisiert.`))
-      .catch((error) => setSyncStatusText(`Verschieben lokal durchgeführt, Server-Sync fehlgeschlagen: ${error.message || error}`))
-      .finally(() => triggerPostActionSync(targetRole === 'deleted' ? 'Löschen' : targetRole === 'junk' ? 'Spam/Junk' : 'Archivieren', targetEmails));
+    const targetLabel = targetRole === 'deleted' ? 'Papierkorb' : targetRole === 'junk' ? 'Spam/Junk' : 'Archiv';
+    enqueueMailMutation({
+      type: 'move-role',
+      targetEmails,
+      targetRole,
+      reason: `${ids.length} E-Mail(s) nach ${targetLabel} verschieben`
+    });
+    setSyncStatusText(`${ids.length} E-Mail(s) lokal nach ${targetLabel} verschoben; Serveränderung wurde vorgemerkt.`);
   };
   // Options add/remove multiple accounts
   const syncInboxForAccount = async (account: any, password: string): Promise<{ emails: Email[]; folders: any[] }> => {
@@ -5554,7 +5693,7 @@ Julia`,
                   <div className="space-y-4 animate-fade-in pb-4 select-text">
                     <h3 className="text-xs font-extrabold text-[#323130] uppercase tracking-widest pb-1 border-b border-slate-200 flex items-center justify-between">
                       <span>Hilfe, Impressum &amp; Datenschutz</span>
-                      <span className="text-[9.5px] text-[#0078d4] font-mono font-bold">Produktkonformität</span>
+                      <span className="text-[9.5px] text-[#0078d4] font-mono font-bold">Stand 12.09.2026</span>
                     </h3>
 
                     {/* Section 1: Impressum */}
@@ -5563,10 +5702,10 @@ Julia`,
                         <span className="mr-1.5">Hinweis</span> Impressum (Gesetzliche Angaben)
                       </h4>
                       <div className="text-[11px] text-slate-600 leading-relaxed font-semibold space-y-1 pl-2 border-l-2 border-slate-300">
-                        <p><strong>Umfang:</strong> Impressum, Datenschutz &amp; Geschäftsbedingungen</p>
-                        <p><strong>Unternehmen:</strong> PACOPAR</p>
+                        <p><strong>Anbieter:</strong> PACOPAR</p>
                         <p><strong>Anbieter-Adresse:</strong> Ruta 2, Km57, Mariscal Estigarribia, 03000 Caacupe, PARAGUAY</p>
                         <p><strong>Kontakt &amp; Support:</strong> hello@unique-utilities.com</p>
+                        <p className="text-amber-700"><strong>Vor Veröffentlichung zu ergänzen:</strong> vollständige Rechtsform, Vertretungsberechtigte, Register/Registernummer und Steuer-ID, soweit jeweils anwendbar.</p>
                       </div>
                     </div>
 
@@ -5575,14 +5714,14 @@ Julia`,
                       <h4 className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wider flex items-center">
                         <span className="mr-1.5">Hinweis</span> Datenschutz (Privacy Policy)
                       </h4>
-                      <p className="text-xs text-slate-650 leading-relaxed font-semibold pl-2">
-                        Ihre Privatsphäre und Datensicherheit stehen für uns an oberster Stelle. Dementsprechend gilt für <strong>Unique Mail</strong>:
-                      </p>
                       <ul className="text-[11px] text-slate-500 list-disc list-inside space-y-1 pl-3 font-medium">
-                        <li><strong>Lokale Datenhaltung:</strong> Sämtliche Passwörter (IMAP, SMTP), E-Mails, Termine und Kontakte werden ausschließlich lokal auf Ihrem Rechner in einer passwortgeschützten SQLite-Datenbank (<code className="bg-slate-100 font-mono px-1 rounded">outlook.db</code>) gespeichert.</li>
-                        <li><strong>SSL-Verschlüsselung:</strong> Alle Übertragungen zu Ihren IMAP- und SMTP-Mailservern erfolgen über TLS-gesicherte Punkt-zu-Punkt-Verbindungen.</li>
-                        <li><strong>Kein Tracking:</strong> Die Anwendung sendet keinerlei Nutzungsverhalten, Telemetriedaten oder Logdateien an uns. Ihre Daten gehören zu 100% Ihnen.</li>
+                        <li><strong>Lokal:</strong> E-Mails, Anlagen, Kontakte, Termine, Entwürfe, Einstellungen und Diagnoseprotokolle werden auf diesem Gerät gespeichert.</li>
+                        <li><strong>Passwörter:</strong> Kontozugangsdaten liegen getrennt in Electron <code className="bg-slate-100 font-mono px-1 rounded">safeStorage</code> und werden mit Betriebssystemfunktionen verschlüsselt, sofern verfügbar.</li>
+                        <li><strong>Netzwerk:</strong> IMAP-/SMTP-Anbieter verarbeiten die zum Abruf und Versand nötigen Daten. Updateprüfungen kontaktieren GitHub. Freigegebene externe Bilder kontaktieren deren Host.</li>
+                        <li><strong>Optionale Dienste:</strong> Gemini erhält nur Text, wenn eine KI-Funktion aktiv ausgelöst und ein API-Schlüssel eingerichtet wurde. Feedback wird über den konfigurierten SMTP-Dienst versendet oder lokal vorgemerkt.</li>
+                        <li><strong>Kein Tracking:</strong> Die App enthält keine Werbung, externe Analyse oder automatische Übertragung lokaler Protokolle.</li>
                       </ul>
+                      <p className="text-[10px] text-slate-500 pl-3">Die ausführliche Fassung befindet sich als <code>PRIVACY.md</code> in der Installation.</p>
                     </div>
 
                     {/* Section 3: Open-Source-Lizenzen */}
@@ -5591,13 +5730,14 @@ Julia`,
                         <span className="mr-1.5">Hinweis</span> Open-Source-Lizenzen &amp; Urheberrechte
                       </h4>
                       <p className="text-[11px] text-slate-600 leading-relaxed font-semibold pl-2">
-                        Diese Anwendung nutzt zur Sicherstellung offener Standards folgende lizensierte Open-Source-Bibliotheken:
+                        Die App verwendet unter anderem folgende Open-Source-Komponenten:
                       </p>
                       <ul className="text-[11px] text-slate-550 space-y-1.5 font-medium pl-3">
-                        <li>• <strong>MailKit / MimeKit (.NET):</strong> Leistungsstarker MIT-lizenzierter E-Mail-Parser &amp; IMAP/SMTP Client für .NET Core 8.</li>
-                        <li>• <strong>Microsoft.Data.Sqlite:</strong> SQLite-Assembly (MIT-Lizenz) zur transaktionssicheren lokalen Aufbewahrung.</li>
-                        <li>• <strong>@google/genai &amp; lucide-react:</strong> Genutzt für dynamische Interface-Icons (MIT) und KI-Dienste (Apache 2.0).</li>
+                        <li>• <strong>Electron, React und Vite:</strong> Desktop-Laufzeit, Benutzeroberfläche und Buildsystem.</li>
+                        <li>• <strong>ImapFlow, Nodemailer und MailParser:</strong> IMAP-Abruf, SMTP-Versand und MIME-Verarbeitung.</li>
+                        <li>• <strong>Lucide React, Motion und Google GenAI:</strong> Icons, Animationen und optionale KI-Funktionen.</li>
                       </ul>
+                      <p className="text-[10px] text-slate-500 pl-3">Komplette Versions- und Lizenzangaben: <code>THIRD_PARTY_NOTICES.txt</code>. Electron liefert zusätzlich seine Electron- und Chromium-Lizenzdateien mit.</p>
                     </div>
 
                     {/* Section 4: Sonstige Angaben */}
@@ -5606,8 +5746,10 @@ Julia`,
                         <span className="mr-1.5">Hinweis</span> Sonstige Angaben zum Vertrieb
                       </h4>
                       <div className="text-[11px] text-slate-500 leading-relaxed font-semibold pl-2 space-y-1">
-                        <p><strong>System-Identifikationsnummer (UID):</strong> UM-WPF-802</p>
-                        <p><strong>Zertifizierung:</strong> Konforme Code-Signierung für Microsoft Windows App Store Sandbox-Kriterien im Rahmen von Windows Secure App-Sicherheitsrichtlinien.</p>
+                        <p><strong>Quellcode:</strong> github.com/rakneznar/Unique-Mail-OpenSource</p>
+                        <p><strong>Projektlizenz:</strong> Apache License 2.0</p>
+                        <p><strong>Sicherheit:</strong> Schwachstellen bitte vertraulich an hello@unique-utilities.com melden.</p>
+                        <p className="text-amber-700"><strong>Hinweis:</strong> Dieser Build beansprucht weder Microsoft-Store-Zertifizierung noch eine durch ein externes Audit bestätigte Rechtskonformität.</p>
                       </div>
                     </div>
                   </div>
