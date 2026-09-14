@@ -20,7 +20,7 @@ import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.4.57';
+const APP_VERSION = '0.5.59';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';

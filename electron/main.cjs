@@ -1666,6 +1666,30 @@ ipcMain.handle('native:save-attachment', async (_event, payload) => {
   }
 });
 
+ipcMain.handle('native:save-attachment-as', async (event, payload) => {
+  try {
+    const attachment = payload?.attachment;
+    if (!attachment?.contentBase64) throw new Error('Anlage enthaelt keine lokal geladenen Daten.');
+    const filename = sanitizeDownloadFilename(attachment.filename);
+    const extension = path.extname(filename).replace(/^\./, '');
+    const saveOptions = {
+      title: 'Anlage speichern unter',
+      defaultPath: path.join(app.getPath('downloads'), filename),
+      filters: extension ? [{ name: `${extension.toUpperCase()}-Datei`, extensions: [extension] }] : undefined
+    };
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const result = owner
+      ? await dialog.showSaveDialog(owner, saveOptions)
+      : await dialog.showSaveDialog(saveOptions);
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    await fs.promises.mkdir(path.dirname(result.filePath), { recursive: true });
+    await fs.promises.writeFile(result.filePath, Buffer.from(String(attachment.contentBase64), 'base64'));
+    return { ok: true, filePath: result.filePath, directory: path.dirname(result.filePath) };
+  } catch (error) {
+    return { ok: false, error: error.message || String(error) };
+  }
+});
+
 ipcMain.handle('native:save-attachments', async (_event, payload) => {
   try {
     const directory = resolveDownloadDirectory(payload?.directory);

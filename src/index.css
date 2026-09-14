@@ -805,6 +805,22 @@ textarea:not(:disabled):not([readonly]),
   color: #ffffff !important;
 }
 
+.dark #attachment-context-menu {
+  background-color: #111a2d !important;
+  border-color: #334155 !important;
+  color: #e5edf8 !important;
+}
+
+.dark #attachment-context-menu button {
+  border-color: #334155 !important;
+  color: #7dd3fc !important;
+}
+
+.dark #attachment-context-menu button:hover {
+  background-color: #203456 !important;
+  color: #ffffff !important;
+}
+
 .dark #mail-reading-pane .bg-amber-50 *,
 .dark #mail-reading-pane .bg-yellow-50 *,
 .dark #mail-reading-pane .bg-orange-50 *,

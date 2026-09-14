@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('uniqueMailNative', {
   chooseDownloadDirectory: () => ipcRenderer.invoke('native:choose-download-directory'),
   getDefaultDownloadDirectory: () => ipcRenderer.invoke('native:get-default-download-directory'),
   saveAttachment: (payload) => ipcRenderer.invoke('native:save-attachment', payload),
+  saveAttachmentAs: (payload) => ipcRenderer.invoke('native:save-attachment-as', payload),
   saveAttachments: (payload) => ipcRenderer.invoke('native:save-attachments', payload),
   prepareAttachmentDrag: (payload) => ipcRenderer.invoke('native:prepare-attachment-drag', payload),
   openAttachment: (payload) => ipcRenderer.invoke('native:open-attachment', payload),

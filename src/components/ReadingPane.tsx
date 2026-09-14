@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Paperclip, Mail, Phone, MapPin, Building, Briefcase, Calendar, 
-  Clock, CheckSquare, Code, Check, Send, Copy, FileText, FileSpreadsheet, FileArchive, FileImage, ShieldAlert, Signature, ExternalLink
+  Clock, CheckSquare, Code, Check, Send, Copy, FileText, FileSpreadsheet, FileArchive, FileImage, ShieldAlert, Signature, ExternalLink, Download, Save
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, CalendarItemDraft, KnownRecipient } from '../types';
 import { useComposePastePrompt } from './ComposePastePrompt';
@@ -687,15 +687,26 @@ a{color:#0078d4;cursor:pointer}
     });
   }, []);
 
-  const saveAttachmentToDisk = async (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
+  const saveAttachmentToDownloads = async (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
     if (!attachment.contentBase64) {
       alert('Diese Anlage ist noch nicht vollständig lokal geladen. Bitte Nachricht aktualisieren und erneut versuchen.');
       return;
     }
     const nativeApi = (window as any).uniqueMailNative;
-    const result = await nativeApi?.saveAttachment?.({ attachment, directory: attachmentDownloadDirectory });
+    const result = await nativeApi?.saveAttachment?.({ attachment, directory: '' });
     if (result?.ok) alert(`Anlage gespeichert: ${result.filePath}`);
     else alert(result?.error || 'Anlage konnte nicht gespeichert werden.');
+  };
+
+  const saveAttachmentAs = async (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
+    if (!attachment.contentBase64) {
+      alert('Diese Anlage ist noch nicht vollständig lokal geladen. Bitte Nachricht aktualisieren und erneut versuchen.');
+      return;
+    }
+    const nativeApi = (window as any).uniqueMailNative;
+    const result = await nativeApi?.saveAttachmentAs?.({ attachment });
+    if (result?.ok) alert(`Anlage gespeichert: ${result.filePath}`);
+    else if (!result?.canceled) alert(result?.error || 'Anlage konnte nicht gespeichert werden.');
   };
 
   const saveAllAttachmentsToDisk = async () => {
@@ -1751,8 +1762,13 @@ a{color:#0078d4;cursor:pointer}
         )}
           {attachmentContextMenu && (
             <div
-              className="fixed z-[10000] w-52 rounded-xl border border-slate-200 bg-white shadow-xl py-1.5 text-[11px] font-bold text-slate-700"
-              style={{ top: attachmentContextMenu.y, left: attachmentContextMenu.x }}
+              id="attachment-context-menu"
+              role="menu"
+              className="fixed z-[10000] w-60 rounded-lg border border-slate-200 bg-white shadow-xl py-1.5 text-[11px] font-bold text-slate-700"
+              style={{
+                top: Math.max(8, Math.min(attachmentContextMenu.y, window.innerHeight - 190)),
+                left: Math.max(8, Math.min(attachmentContextMenu.x, window.innerWidth - 250))
+              }}
               onMouseLeave={() => setAttachmentContextMenu(null)}
             >
               <button
@@ -1771,10 +1787,19 @@ a{color:#0078d4;cursor:pointer}
               </button>
               <button
                 type="button"
-                onClick={() => { saveAttachmentToDisk(attachmentContextMenu.attachment); setAttachmentContextMenu(null); }}
-                className="w-full text-left px-3 py-2 hover:bg-slate-50 text-[#0078d4]"
+                role="menuitem"
+                onClick={() => { void saveAttachmentToDownloads(attachmentContextMenu.attachment); setAttachmentContextMenu(null); }}
+                className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2 text-left text-[#0078d4] hover:bg-slate-50"
               >
-                Anlage herunterladen
+                <Download className="h-4 w-4" /> Unter Downloads speichern
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { void saveAttachmentAs(attachmentContextMenu.attachment); setAttachmentContextMenu(null); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[#0078d4] hover:bg-slate-50"
+              >
+                <Save className="h-4 w-4" /> Speichern unter...
               </button>
             </div>
           )}
