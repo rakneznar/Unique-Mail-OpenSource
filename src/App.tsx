@@ -2211,7 +2211,7 @@ exit`;
         if (syncResult.folders.length > 0) {
           setAccounts(prev => prev.map(acc => acc.email.toLowerCase() === account.email.toLowerCase() ? { ...acc, serverFolders: syncResult.folders } : acc));
         }
-        setEmails(prev => mergeSyncedEmails(prev, account.email, syncResult.emails));
+        setEmails(prev => mergeSyncedEmails(prev, account.email, syncResult.emails, syncResult.folders, syncResult.failedFolders));
       }
       setSyncProgress(100);
       setSyncStatusText(`Vollsync abgeschlossen: ${syncedEmails} E-Mail(s) aus ${syncedFolders} Serverordner(n) und ${syncedAccounts} Konto/Konten aktualisiert.`);
@@ -2297,7 +2297,7 @@ exit`;
       isRead: true,
       isFlagged: false,
       hasAttachment: message.attachments.length > 0,
-      importance: 'normal',
+      importance: message.importance || 'normal',
       category: 'Entwurf',
       folder: existingDraft?.folder || 'drafts',
       imapFolder: existingDraft?.imapFolder || 'drafts',
@@ -2371,6 +2371,7 @@ exit`;
         sourceFolder: (source?.imapUid || draftMail.imapUid) ? (source?.imapFolder || draftMail.imapFolder) : undefined,
         sourceUid: source?.imapUid || draftMail.imapUid,
         attachments: message.attachments,
+        importance: message.importance,
       })
     });
     const data = await response.json().catch(() => ({}));
@@ -2488,7 +2489,7 @@ exit`;
       isRead: true,
       isFlagged: false,
       hasAttachment: message.attachments.length > 0,
-      importance: 'normal',
+      importance: message.importance || 'normal',
       category: 'Postausgang',
       folder: 'outbox',
       imapFolder: 'outbox',
@@ -2539,7 +2540,8 @@ exit`;
             subject: message.subject || '(Kein Betreff)',
             html: message.body,
             sentFolder,
-            attachments: message.attachments
+            attachments: message.attachments,
+            importance: message.importance
           })
         });
 
@@ -2602,6 +2604,7 @@ exit`;
       subject: mail.subject,
       body: mail.body,
       attachments: mail.draftAttachments || [],
+      importance: mail.importance || 'normal',
       sourceId: mail.id
     });
   };
@@ -2898,15 +2901,24 @@ exit`;
   const messagePrefetchTimerRef = useRef<number | null>(null);
   const mailStorePrefetchAccountsRef = useRef<Set<string>>(new Set());
 
-  const mergeSyncedEmails = (previous: Email[], accountEmail: string, syncedEmails: Email[]) => {
+  const mergeSyncedEmails = (previous: Email[], accountEmail: string, syncedEmails: Email[], serverFolders?: any[], failedFolders: string[] = []) => {
     const accountLower = accountEmail.toLowerCase();
+    const authoritativeFolderSnapshot = Array.isArray(serverFolders);
+    const failedFolderKeys = new Set(failedFolders.map(normalizeMailFolderKey));
     const guardedSyncedEmails = syncedEmails.map(guardBlockedSenderMail);
     const incomingById = new Map(guardedSyncedEmails.map(mail => [mail.id, mail]));
     const merged = previous.map(mail => {
       const owner = (mail.accountEmail || '').toLowerCase();
       if (owner !== accountLower) return mail;
       const incoming = incomingById.get(mail.id);
-      if (!incoming) return mail;
+      if (!incoming) {
+        if (!authoritativeFolderSnapshot) return mail;
+        const folderKey = normalizeMailFolderKey(mail.imapFolder || mail.folder);
+        const hasPendingMutation = pendingMailMutationsRef.current.some(mutation => mutation.targetEmails.some(target => target.id === mail.id));
+        const isLocalOnly = !mail.imapUid || String(mail.id).startsWith('draft-') || String(mail.id).startsWith('outbox-');
+        if (hasPendingMutation || isLocalOnly || failedFolderKeys.has(folderKey)) return mail;
+        return null;
+      }
       incomingById.delete(mail.id);
       const pendingMutations = pendingMailMutationsRef.current.filter(mutation => mutation.targetEmails.some(target => {
         if (target.id === mail.id) return true;
@@ -2942,7 +2954,9 @@ exit`;
       };
     });
 
-    return [...Array.from(incomingById.values()), ...merged].map(guardBlockedSenderMail);
+    return [...Array.from(incomingById.values()), ...merged]
+      .filter((mail): mail is Email => mail !== null)
+      .map(guardBlockedSenderMail);
   };
 
   useEffect(() => {
@@ -3344,7 +3358,7 @@ exit`;
             : acc
           ));
         }
-        setEmails(prev => mergeSyncedEmails(prev, account.email, syncResult.emails));
+        setEmails(prev => mergeSyncedEmails(prev, account.email, syncResult.emails, syncResult.folders, syncResult.failedFolders));
       }
 
       setSyncProgress(100);
@@ -3409,6 +3423,57 @@ exit`;
       return needles.some(needle => value.includes(needle.replace('\\', '')));
     });
     return byPath?.path || byPath?.id || role;
+  };
+
+  const emptyTrash = async (accountEmail?: string, requestedFolder?: string) => {
+    if (isOffline) {
+      alert('Der Papierkorb kann im Offlinemodus nicht auf dem Server geleert werden.');
+      return;
+    }
+    const targetAccounts = accountEmail
+      ? accounts.filter(account => account.email.toLowerCase() === accountEmail.toLowerCase())
+      : accounts;
+    if (targetAccounts.length === 0) return;
+    const label = targetAccounts.length === 1 ? `von ${targetAccounts[0].email}` : 'aller Konten';
+    if (!window.confirm(`Papierkorb ${label} dauerhaft leeren? Diese Aktion kann nicht rückgängig gemacht werden.`)) return;
+
+    setSyncStatusText(`Papierkorb ${label} wird im Hintergrund geleert...`);
+    const jobKey = `mail-empty-trash:${accountEmail?.toLowerCase() || 'all'}`;
+    void enqueueBackgroundJob(jobKey, 100, async () => {
+      let deletedTotal = 0;
+      for (const account of targetAccounts) {
+        const password = await getStoredAccountPasswordNoPrompt(account);
+        if (!password) throw new Error(`Gespeichertes Passwort für ${account.email} ist nicht verfügbar.`);
+        const folder = requestedFolder && targetAccounts.length === 1
+          ? requestedFolder
+          : resolveServerFolderPath(account, 'deleted');
+        const response = await fetch('/api/mail/folders/empty', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: account.email,
+            password,
+            imapServer: account.imapServer,
+            imapPort: account.imapPort,
+            folder
+          })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Papierkorb von ${account.email} konnte nicht geleert werden.`);
+        deletedTotal += Number(data.deleted || 0);
+        setEmails(previous => previous.filter(mail => {
+          const owner = (mail.accountEmail || '').toLowerCase();
+          const mailFolder = normalizeMailFolderKey(mail.imapFolder || mail.folder);
+          return owner !== account.email.toLowerCase() || mailFolder !== normalizeMailFolderKey(folder);
+        }));
+      }
+      setSelectedEmailId(null);
+      setSyncStatusText(`${deletedTotal} Nachricht(en) dauerhaft aus dem Papierkorb entfernt.`);
+      triggerPostActionSync('Papierkorb geleert');
+    }).catch(error => {
+      setSyncStatusText(`Papierkorb konnte nicht geleert werden: ${error?.message || error}`);
+      alert(error?.message || 'Der Papierkorb konnte nicht geleert werden.');
+    });
   };
 
   const postReadStateForEmails = async (targetEmails: Email[], isRead: boolean) => {
@@ -3954,7 +4019,7 @@ exit`;
     setSyncStatusText(`${ids.length} E-Mail(s) lokal nach ${targetLabel} verschoben; Serveränderung wurde vorgemerkt.`);
   };
   // Options add/remove multiple accounts
-  const syncInboxForAccount = async (account: any, password: string): Promise<{ emails: Email[]; folders: any[] }> => {
+  const syncInboxForAccount = async (account: any, password: string): Promise<{ emails: Email[]; folders: any[]; failedFolders: string[] }> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 180000);
 
@@ -3978,7 +4043,8 @@ exit`;
 
       return {
         emails: Array.isArray(data.emails) ? data.emails : [],
-        folders: Array.isArray(data.folders) ? data.folders : []
+        folders: Array.isArray(data.folders) ? data.folders : [],
+        failedFolders: Array.isArray(data.failedFolders) ? data.failedFolders : []
       };
     } catch (error: any) {
       if (error?.name === 'AbortError') {
@@ -4009,7 +4075,7 @@ exit`;
         setAccounts(prev => prev.map(acc => acc.email.toLowerCase() === emailSeed.toLowerCase() ? { ...acc, serverFolders } : acc));
       }
       const nextFolder = pickVisibleFolderAfterSync(syncedEmails, serverFolders);
-      setEmails(prev => mergeSyncedEmails(prev, emailSeed, syncedEmails));
+      setEmails(prev => mergeSyncedEmails(prev, emailSeed, syncedEmails, serverFolders, syncResult.failedFolders));
       setSelectedFolder(nextFolder);
       setSelectedEmailId(pickVisibleEmailAfterSync(syncedEmails, nextFolder));
       setOptionsSyncLogs(prev => [...prev, `[OK] ${syncedEmails.length} E-Mail(s) aus allen Serverordnern geladen.`]);
@@ -4296,6 +4362,7 @@ exit`;
         onToggleSelectedFavorite={handleToggleSelectedFavorite}
         onBlockSelectedSender={handleBlockSelectedSender}
         onPrintSelectedEmail={() => void handlePrintEmail()}
+        onEmptyTrash={() => void emptyTrash()}
         onResend={() => void handleResendEmail()}
         canResendSelected={isSentMessage(selectedEmailForActions)}
         selectedEmailIsRead={selectedEmailForActions?.isRead ?? true}
@@ -4550,6 +4617,7 @@ exit`;
                 onMoveEmailsToFolder={moveEmailsToSpecificFolder}
                 onMoveFolder={moveFolderOnServer}
                 onManageFolder={manageFolderOnServer}
+                onEmptyTrash={emptyTrash}
               />
             )}
 
@@ -4602,6 +4670,7 @@ exit`;
 
             {/* Column 3: Rich detail viewer reading pane */}
             <ReadingPane 
+              isDarkMode={isDarkMode}
               currentPage={currentPage}
               emails={emails}
               selectedEmailId={selectedEmailId}

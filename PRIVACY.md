@@ -9,6 +9,7 @@ Unique Mail is a local-first desktop mail client. Mail data, contacts, calendar 
 - Configured IMAP and SMTP servers receive account credentials and mail data as necessary to fetch, synchronize, and send mail.
 - GitHub is contacted to check for application updates and download releases. GitHub receives normal connection metadata such as the IP address and user agent.
 - Remote images embedded in email are fetched only after the user permits them or trusts the sender. The image host can receive normal connection metadata and identifiers contained in the image URL.
+- For visible messages from business domains, a small domain icon is requested lazily from DuckDuckGo's icon service. Only the sender domain, not the full email address, is included in that request; the service receives normal connection metadata. Generic personal mail providers continue to use local initials.
 - Gemini is contacted only when an AI-assisted feature is invoked and an API key is configured. Text submitted to that feature is transferred to Google for processing.
 - Bug reports and feature requests are sent through the configured feedback SMTP service. If it is not configured, reports remain in a local feedback outbox.
 - Links are opened in the user's default browser; the destination website then applies its own privacy policy.

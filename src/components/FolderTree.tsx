@@ -65,6 +65,7 @@ interface FolderTreeProps {
     sourceFolder?: string;
     name?: string;
   }) => Promise<{ resultingFolder?: string; delimiter?: string } | void> | void;
+  onEmptyTrash?: (accountEmail: string, folderId: string) => Promise<void> | void;
 }
 
 export default function FolderTree({
@@ -77,7 +78,8 @@ export default function FolderTree({
   setActiveAccountEmail,
   onMoveEmailsToFolder,
   onMoveFolder,
-  onManageFolder
+  onManageFolder,
+  onEmptyTrash
 }: FolderTreeProps) {
   type FavoriteFolderEntry = { accountEmail: string; id: string; label: string };
   type PendingFolderDrop = {
@@ -105,6 +107,11 @@ export default function FolderTree({
     label: string;
     delimiter: string;
     canModify: boolean;
+  };
+  const isTrashFolder = (folderId: string, label: string) => {
+    const leaf = String(folderId || '').split(/[\\/\.]/).pop() || '';
+    return /^(?:trash|deleted|deleted items|papierkorb|gel(?:ö|oe)schte(?: elemente)?)$/i.test(leaf.trim())
+      || /^(?:trash|deleted items|papierkorb|gel(?:ö|oe)schte(?: elemente)?)$/i.test(String(label || '').trim());
   };
   type FolderActionDialog = Omit<FolderContextTarget, 'x' | 'y' | 'canModify'> & {
     action: 'create' | 'rename' | 'delete';
@@ -165,6 +172,14 @@ export default function FolderTree({
   useEffect(() => {
     localStorage.setItem('uniquemail_folder_favorites', JSON.stringify(favoriteFolderEntries));
   }, [favoriteFolderEntries]);
+
+  useEffect(() => {
+    setFavoriteFolderEntries(previous => previous.filter(favorite => {
+      const account = accounts.find(item => item.email.toLowerCase() === favorite.accountEmail.toLowerCase());
+      if (!account || !Array.isArray(account.serverFolders) || account.serverFolders.length === 0) return true;
+      return account.serverFolders.some(folder => normalizeFolderKey(folder.path || folder.id) === normalizeFolderKey(favorite.id));
+    }));
+  }, [accounts]);
 
   useEffect(() => {
     const reloadFavoriteFolders = () => {
@@ -945,6 +960,20 @@ export default function FolderTree({
         <button type="button" role="menuitem" onClick={() => openFolderAction(folderContextMenu, 'create')} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold hover:bg-blue-50 hover:text-[#005a9e]">
           <FolderPlus className="h-4 w-4 text-[#0078d4]" /> Neuen Unterordner erstellen
         </button>
+        {isTrashFolder(folderContextMenu.folderId, folderContextMenu.label) && (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const target = folderContextMenu;
+              setFolderContextMenu(null);
+              void onEmptyTrash?.(target.accountEmail, target.folderId);
+            }}
+            className="flex w-full items-center gap-2 border-t border-slate-200 px-3 py-2 text-left text-[11px] font-semibold text-red-700 hover:bg-red-50"
+          >
+            <Trash2 className="h-4 w-4" /> Papierkorb leeren
+          </button>
+        )}
         {folderContextMenu.canModify && (
           <>
             <button type="button" role="menuitem" onClick={() => openFolderAction(folderContextMenu, 'rename')} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold hover:bg-slate-100">

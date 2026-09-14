@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bold, Italic, Underline, List, ListOrdered, Mail, Paperclip, Send, PanelTopClose, Trash2 } from 'lucide-react';
+import { Bold, Italic, Underline, List, ListOrdered, Mail, Paperclip, Send, PanelTopClose, Trash2, ShieldAlert } from 'lucide-react';
 import type { ComposeMailPayload } from './ReadingPane';
 import { useComposePastePrompt } from './ComposePastePrompt';
 import { readEmlAttachmentsFromDrop } from '../utils/eml';
@@ -29,7 +29,7 @@ const fileToPayload = (file: File) => new Promise<{ filename: string; contentTyp
 });
 
 export default function DetachedComposeWindow() {
-  const [payload, setPayload] = React.useState<ComposeMailPayload>({ to: '', cc: '', bcc: '', subject: '', body: '', attachments: [] });
+  const [payload, setPayload] = React.useState<ComposeMailPayload>({ to: '', cc: '', bcc: '', subject: '', body: '', attachments: [], importance: 'normal' });
   const [loaded, setLoaded] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const editorRef = React.useRef<HTMLDivElement>(null);
@@ -185,6 +185,13 @@ export default function DetachedComposeWindow() {
         ))}
         <label className="grid grid-cols-[62px_1fr] items-center gap-2 text-xs"><span className="font-bold text-slate-500">BETREFF</span>
           <input value={payload.subject} onChange={event => update('subject', event.target.value)} className="border border-slate-300 bg-white px-3 py-2 outline-none focus:border-[#0078d4] dark:border-slate-600 dark:bg-slate-800" />
+        </label>
+        <label className="grid grid-cols-[62px_1fr] items-center gap-2 text-xs"><span className="flex items-center gap-1 font-bold text-slate-500"><ShieldAlert className="h-3.5 w-3.5" />PRIORITÄT</span>
+          <select value={payload.importance || 'normal'} onChange={event => update('importance', event.target.value)} className={`border bg-white px-3 py-2 font-bold dark:bg-slate-800 ${payload.importance === 'high' ? 'border-red-300 text-red-700 dark:border-red-700 dark:text-red-300' : 'border-slate-300 dark:border-slate-600'}`}>
+            <option value="normal">Normal</option>
+            <option value="high">Hoch - dringlich</option>
+            <option value="low">Niedrig</option>
+          </select>
         </label>
       </section>
 

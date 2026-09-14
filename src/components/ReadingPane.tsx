@@ -28,6 +28,7 @@ export interface ComposeMailPayload {
   subject: string;
   body: string;
   attachments: ComposeAttachmentPayload[];
+  importance: 'normal' | 'high' | 'low';
   accountEmail?: string;
   sourceId?: string;
 }
@@ -35,6 +36,7 @@ export interface ComposeMailPayload {
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward' | 'resend' | 'draft' | 'outbox';
 
 interface ReadingPaneProps {
+  isDarkMode?: boolean;
   currentPage: 'mail' | 'calendar' | 'contacts' | 'crm' | 'tasks' | 'notes' | 'dev';
   emails: Email[];
   selectedEmailId: string | null;
@@ -78,6 +80,7 @@ interface ReadingPaneProps {
 }
 
 export default function ReadingPane({
+  isDarkMode = false,
   currentPage,
   emails,
   selectedEmailId,
@@ -127,6 +130,7 @@ export default function ReadingPane({
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [subjectInput, setSubjectInput] = useState('');
   const [bodyInput, setBodyInput] = useState('');
+  const [composeImportance, setComposeImportance] = useState<'normal' | 'high' | 'low'>('normal');
   const [composeSignatureChoice, setComposeSignatureChoice] = useState<'none' | 'account' | 'default'>('none');
   const [composeDraftId, setComposeDraftId] = useState('');
   const [showDraftClosePrompt, setShowDraftClosePrompt] = useState(false);
@@ -320,14 +324,11 @@ export default function ReadingPane({
   const activeEmailBodyForDisplay = React.useMemo(() => rawEmailBodyLooksHtml
     ? sanitizeMailHtml(rawEmailBodyForDisplay)
     : rawEmailBodyForDisplay, [rawEmailBodyForDisplay, rawEmailBodyLooksHtml]);
-  const mailBodyUsesDarkColors = document.documentElement.classList.contains('dark');
   const mailBodyFrameDocument = React.useMemo(() => {
-    const foreground = mailBodyUsesDarkColors ? '#e2e8f0' : '#1f2937';
-    const background = mailBodyUsesDarkColors ? '#141a29' : '#ffffff';
     return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-html,body{margin:0;padding:0;width:100%;min-width:0;max-width:100%;background:${background};color:${foreground};font:14px/1.55 Arial,sans-serif;overflow-wrap:anywhere;word-break:normal}
+html,body{margin:0;padding:0;width:100%;min-width:0;max-width:100%;background:#ffffff;color:#111827;color-scheme:light;font:14px/1.55 Arial,sans-serif;overflow-wrap:anywhere;word-break:normal}
 *,*::before,*::after{box-sizing:border-box}
 body *{min-width:0!important;max-width:100%!important}
 table,tbody,thead,tfoot,tr,td,th,div,section,article,header,footer,main{max-width:100%!important}
@@ -337,7 +338,7 @@ img,video,svg,canvas{max-width:100%!important;height:auto!important}
 pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
 a{color:#0078d4;cursor:pointer}
 </style></head><body>${activeEmailBodyForDisplay}</body></html>`;
-  }, [activeEmailBodyForDisplay, mailBodyUsesDarkColors]);
+  }, [activeEmailBodyForDisplay]);
   const formatAddressList = (value?: string) => (value || '')
     .split(/[;,]/)
     .map(part => part.trim())
@@ -877,6 +878,9 @@ a{color:#0078d4;cursor:pointer}
       setStoredAttachmentPayloads([]);
       const signatureHtml = signatureActive && signatureText ? buildSignatureHtml(signatureText) : '';
       setComposeSignatureChoice(signatureHtml ? 'account' : 'none');
+      setComposeImportance(activeEmail && ['resend', 'draft', 'outbox'].includes(composeMode)
+        ? activeEmail.importance || 'normal'
+        : 'normal');
 
       setComposeAccountEmail(activeEmail?.accountEmail || defaultComposeAccountEmail);
 
@@ -970,10 +974,11 @@ a{color:#0078d4;cursor:pointer}
       subject: subjectInput,
       body: editorRef.current ? editorRef.current.innerHTML : bodyInput,
       attachments: [...storedAttachmentPayloads, ...freshAttachments],
+      importance: composeImportance,
       accountEmail: composeAccountEmail || defaultComposeAccountEmail,
       sourceId: composeDraftId || activeEmail?.id || `draft-${Date.now()}`,
     };
-  }, [toInput, ccInput, bccInput, subjectInput, bodyInput, storedAttachmentPayloads, composeAttachments, composeAccountEmail, defaultComposeAccountEmail, composeDraftId, activeEmail?.id]);
+  }, [toInput, ccInput, bccInput, subjectInput, bodyInput, storedAttachmentPayloads, composeAttachments, composeAccountEmail, defaultComposeAccountEmail, composeDraftId, composeImportance, activeEmail?.id]);
 
   React.useEffect(() => {
     if (!isWritingEmail || !composeInitializedRef.current || !composeDraftId || !onAutoSaveDraft) return;
@@ -984,7 +989,7 @@ a{color:#0078d4;cursor:pointer}
       (window as any).uniqueMailNative?.persistRendererStorage?.();
       onAutoSaveDraft(payload);
     }).catch(() => undefined);
-  }, [isWritingEmail, composeDraftId, toInput, ccInput, bccInput, subjectInput, bodyInput, storedAttachmentPayloads, composeAttachments, composeAccountEmail, composeSignatureChoice, buildComposePayload]);
+  }, [isWritingEmail, composeDraftId, toInput, ccInput, bccInput, subjectInput, bodyInput, storedAttachmentPayloads, composeAttachments, composeAccountEmail, composeSignatureChoice, composeImportance, buildComposePayload]);
 
   React.useEffect(() => {
     const handleAppClose = (event: Event) => {
@@ -1144,6 +1149,23 @@ a{color:#0078d4;cursor:pointer}
             />
           </div>
           <div className="grid grid-cols-[60px_1fr] items-center text-xs">
+            <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px] flex items-center gap-1" title="Dringlichkeit für den Empfänger festlegen">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              Priorität:
+            </span>
+            <select
+              id="compose-priority-select"
+              value={composeImportance}
+              onChange={(event) => setComposeImportance(event.target.value as 'normal' | 'high' | 'low')}
+              className={`px-3 py-1.5 border rounded-lg bg-white dark:bg-[#1e293b] focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 text-[11.5px] font-bold ${composeImportance === 'high' ? 'border-red-300 text-red-700 dark:border-red-700 dark:text-red-300' : composeImportance === 'low' ? 'border-slate-300 text-slate-500 dark:border-slate-600 dark:text-slate-300' : 'border-slate-200 text-slate-800 dark:border-[#334155] dark:text-white'}`}
+              title="Hohe Priorität wird dem Empfänger als dringlich angezeigt, sofern dessen Mailprogramm dies unterstützt"
+            >
+              <option value="normal">Normal</option>
+              <option value="high">Hoch - dringlich</option>
+              <option value="low">Niedrig</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-[60px_1fr] items-center text-xs">
             <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px] flex items-center gap-1" title="Signatur auswaehlen">
               <Signature className="w-3.5 h-3.5" />
               Signatur:
@@ -1251,20 +1273,6 @@ a{color:#0078d4;cursor:pointer}
             </button>
 
             <span className="h-6 w-[1px] bg-slate-200 dark:bg-slate-700 mx-1"></span>
-
-            {/* Dynamic Font Sizes */}
-            <select
-              onChange={(e) => applyStyle('fontSize', e.target.value)}
-              className="bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white border border-slate-200 dark:border-[#334155] text-[10.5px] p-1 h-8 rounded-lg max-w-[90px] font-bold focus:outline-none cursor-pointer"
-              defaultValue="3"
-            >
-              <option value="1">Winzig</option>
-              <option value="2">Klein</option>
-              <option value="3">Normal</option>
-              <option value="4">Mittel</option>
-              <option value="5">Groß</option>
-              <option value="6">Riesig</option>
-            </select>
 
             {/* Solid Text Color Palette */}
             <div className="flex items-center space-x-1.5 pl-1.5 shrink-0">
@@ -1465,6 +1473,7 @@ a{color:#0078d4;cursor:pointer}
                       subject: subjectInput,
                       body: finalHtml,
                       attachments: [...storedAttachmentPayloads, ...freshAttachments],
+                      importance: composeImportance,
                       accountEmail: composeAccountEmail || defaultComposeAccountEmail,
                       sourceId: activeEmail && (composeMode === 'draft' || composeMode === 'outbox') ? activeEmail.id : undefined,
                     });
@@ -1810,10 +1819,10 @@ a{color:#0078d4;cursor:pointer}
           )}
           {isHtml(activeEmailBodyForDisplay) ? (
             <iframe
-              key={`${selectedEmailId || 'mail'}-${shouldRenderRemoteImages ? 'remote' : 'blocked'}-${mailBodyUsesDarkColors ? 'dark' : 'light'}`}
+              key={`${selectedEmailId || 'mail'}-${shouldRenderRemoteImages ? 'remote' : 'blocked'}-${isDarkMode ? 'dark-shell' : 'light-shell'}`}
               ref={mailBodyFrameRef}
               title="Isolierter E-Mail-Inhalt"
-              className="rich-email-frame block w-full min-w-0 max-w-full border-0 bg-transparent"
+              className="rich-email-frame block w-full min-w-0 max-w-full border border-slate-200 bg-white shadow-sm dark:border-slate-700"
               style={{ height: 300 }}
               sandbox="allow-same-origin"
               referrerPolicy="no-referrer"

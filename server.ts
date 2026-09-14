@@ -53,6 +53,7 @@ type SendMailRequest = SyncInboxRequest & {
   html: string;
   text?: string;
   sentFolder?: string;
+  importance?: 'normal' | 'high' | 'low';
   attachments?: Array<{
     filename: string;
     contentType?: string;
@@ -71,6 +72,7 @@ type SaveDraftRequest = SyncInboxRequest & {
   draftsFolder: string;
   sourceFolder?: string;
   sourceUid?: number;
+  importance?: 'normal' | 'high' | 'low';
   attachments?: Array<{
     filename: string;
     contentType?: string;
@@ -478,6 +480,12 @@ async function buildEmailFromSource(message: any, folderPath: string, email: str
   const preview = toTextPreview(textBody || htmlBody || subject || "");
   const flags = message.flags || new Set();
   const uid = Number(message.uid);
+  const priorityHeader = String(parsed.priority || parsed.headers?.get?.("importance") || parsed.headers?.get?.("x-priority") || "").toLowerCase();
+  const importance = /(?:high|urgent|highest|^1|^2)/.test(priorityHeader)
+    ? "high"
+    : /(?:low|non-urgent|lowest|^4|^5)/.test(priorityHeader)
+      ? "low"
+      : "normal";
 
   const attachments = parsed.attachments.map((attachment: any, index: number) => {
     const fallbackExt = attachment.contentType === "application/pdf"
@@ -510,7 +518,7 @@ async function buildEmailFromSource(message: any, folderPath: string, email: str
     isFlagged: flags.has("\\Flagged"),
     hasAttachment: attachments.length > 0,
     attachments,
-    importance: "normal",
+    importance,
     folder: folderPath,
     accountEmail: email,
     recipientEmail: recipient.email,
@@ -770,6 +778,7 @@ async function startServer() {
       const cachedPayload = await readMailCache(email);
       const cachedEmails = Array.isArray(cachedPayload?.emails) ? cachedPayload.emails : [];
       const fetchedEmails = [];
+      const failedFolders: string[] = [];
       const legacyBodyMigrations: Promise<void>[] = [];
       const selectableFolders = folders.filter(folder => !folder.flags.some(flag => flag.toLowerCase() === "\\noselect"));
 
@@ -810,6 +819,7 @@ async function startServer() {
             }
           }
         } catch (folderError: any) {
+          failedFolders.push(folderInfo.path);
           console.warn("IMAP folder sync skipped", {
             email,
             folder: folderInfo.path,
@@ -827,6 +837,7 @@ async function startServer() {
       const syncPayload = {
         emails: fetchedEmails.map(mailMetadataOnly),
         folders,
+        failedFolders,
         syncedAt: new Date().toISOString()
       };
       await writeMailCache(email, syncPayload).catch((cacheError: any) => {
@@ -960,6 +971,7 @@ async function startServer() {
       text,
       sentFolder,
       attachments,
+      importance = "normal",
     } = req.body as SendMailRequest;
 
     const normalizedTo = normalizeAddressList(to);
@@ -979,6 +991,7 @@ async function startServer() {
       html: html || "",
       text: text || toTextPreview(html || ""),
       attachments: buildSmtpAttachments(attachments),
+      priority: importance,
     };
 
     try {
@@ -1021,7 +1034,7 @@ async function startServer() {
   app.post("/api/mail/drafts/save", async (req, res) => {
     const {
       email, password, imapServer, imapPort, from, to, cc, bcc, subject, html, text,
-      draftsFolder, sourceFolder, sourceUid, attachments,
+      draftsFolder, sourceFolder, sourceUid, attachments, importance = "normal",
     } = req.body as SaveDraftRequest;
 
     if (!email || !password || !imapServer || !imapPort || !from || !draftsFolder) {
@@ -1037,6 +1050,7 @@ async function startServer() {
       html: html || "",
       text: text || toTextPreview(html || ""),
       attachments: buildSmtpAttachments(attachments),
+      priority: importance,
       date: new Date(),
     };
 
@@ -1194,6 +1208,36 @@ async function startServer() {
       res.json({ ok: true, updated: uids.length });
     } catch (error: any) {
       res.status(502).json({ error: error?.message || "Nachverfolgung konnte nicht zum IMAP-Server synchronisiert werden." });
+    } finally {
+      if (lock) lock.release();
+      await client.logout().catch(() => undefined);
+    }
+  });
+
+  app.post("/api/mail/folders/empty", async (req, res) => {
+    const { email, password, imapServer, imapPort, folder } = req.body as SyncInboxRequest & { folder?: string };
+    if (!email || !password || !imapServer || !imapPort || !folder) {
+      return res.status(400).json({ error: "E-Mail, Passwort, IMAP-Daten und Papierkorbordner sind erforderlich." });
+    }
+
+    const client = createImapClient({ email, password, imapServer, imapPort });
+    let lock;
+    try {
+      await client.connect();
+      lock = await client.getMailboxLock(folder);
+      const deleted = Number(client.mailbox && typeof client.mailbox === "object" ? client.mailbox.exists || 0 : 0);
+      if (deleted > 0) await client.messageDelete("1:*", { uid: false });
+
+      const cached = await readMailCache(email);
+      if (cached?.emails) {
+        cached.emails = cached.emails.filter((mail: any) => !sameFolder(mail.folder || mail.imapFolder, folder));
+        cached.syncedAt = new Date().toISOString();
+        await writeMailCache(email, cached);
+      }
+
+      res.json({ ok: true, deleted, folder });
+    } catch (error: any) {
+      res.status(502).json({ error: error?.message || "Der Papierkorb konnte nicht geleert werden." });
     } finally {
       if (lock) lock.release();
       await client.logout().catch(() => undefined);

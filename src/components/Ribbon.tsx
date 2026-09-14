@@ -30,6 +30,7 @@ interface RibbonProps {
   onToggleSelectedFavorite?: () => void;
   onBlockSelectedSender?: () => void;
   onPrintSelectedEmail?: () => void;
+  onEmptyTrash?: () => void;
   selectedEmailIsRead?: boolean;
   selectedEmailIsPinned?: boolean;
   selectedEmailIsFavorite?: boolean;
@@ -79,6 +80,7 @@ export default function Ribbon({
   onToggleSelectedFavorite,
   onBlockSelectedSender,
   onPrintSelectedEmail,
+  onEmptyTrash,
   selectedEmailIsRead = true,
   selectedEmailIsPinned = false,
   selectedEmailIsFavorite = false,
@@ -134,6 +136,7 @@ export default function Ribbon({
     printPdf: language === 'en' ? 'Print / PDF' : 'Drucken / PDF',
     message: language === 'en' ? 'Message' : 'Nachricht',
     archive: language === 'en' ? 'Archive' : 'Archivieren',
+    emptyTrash: language === 'en' ? 'Empty trash' : 'Papierkorb leeren',
     report: language === 'en' ? 'Report' : 'Melden',
     cleanup: language === 'en' ? 'Clean up' : 'Aufräumen',
     reply: language === 'en' ? 'Reply' : 'Antworten',
@@ -450,6 +453,19 @@ export default function Ribbon({
                 >
                   <Archive className="w-4.5 h-4.5 mb-0.5 text-teal-600" />
                   <span className="text-[10px] text-center font-bold">{ribbonText.archive}</span>
+                </button>
+                <button
+                  onClick={onEmptyTrash}
+                  disabled={currentPage !== 'mail'}
+                  className={`flex h-14 w-20 flex-col items-center justify-center border border-transparent p-1 transition-all ${
+                    currentPage === 'mail'
+                      ? 'cursor-pointer text-red-800 hover:border-red-100 hover:bg-red-50 hover:shadow-xs active:scale-95'
+                      : 'cursor-not-allowed text-gray-400 opacity-35'
+                  }`}
+                  title="Papierkorb aller Konten dauerhaft leeren"
+                >
+                  <Trash2 className="mb-0.5 h-4.5 w-4.5 text-red-600" />
+                  <span className="text-center text-[10px] font-bold leading-3">{ribbonText.emptyTrash}</span>
                 </button>
                 <button 
                   onClick={onReportPhishing}

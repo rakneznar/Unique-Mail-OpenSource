@@ -16,6 +16,10 @@ export type MailDateGroup = 'today' | 'yesterday' | 'dayBeforeYesterday' | 'last
 
 const MAIL_DATE_GROUP_ORDER: MailDateGroup[] = ['today', 'yesterday', 'dayBeforeYesterday', 'lastWeek', 'twoWeeksAgo', 'older'];
 const AVATAR_COLORS = ['#0f6cbd', '#107c41', '#8e562e', '#5c2d91', '#b146c2', '#c23934', '#0078d4', '#8764b8'];
+const GENERIC_MAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'yahoo.com', 'icloud.com', 'me.com',
+  'gmx.de', 'gmx.net', 'web.de', 'mail.de', 'posteo.de', 'mailbox.org', 'proton.me', 'protonmail.com', 'pm.me', 'aol.com'
+]);
 
 const startOfLocalDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
 
@@ -55,6 +59,42 @@ const mailAvatar = (party: string, address: string) => {
   const hash = Array.from(hashSource).reduce((sum, character) => ((sum * 31) + character.charCodeAt(0)) >>> 0, 0);
   return { initials: initials.toUpperCase(), color: AVATAR_COLORS[hash % AVATAR_COLORS.length] };
 };
+
+const senderLogoUrl = (address: string) => {
+  const domain = String(address || '').trim().toLowerCase().match(/@([a-z0-9.-]+\.[a-z]{2,})/i)?.[1]?.replace(/^www\./, '');
+  if (!domain || !domain.includes('.') || GENERIC_MAIL_DOMAINS.has(domain)) return '';
+  return `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`;
+};
+
+function SenderAvatar({ party, address, title }: { party: string; address: string; title: string }) {
+  const avatar = mailAvatar(party, address);
+  const logoUrl = senderLogoUrl(address);
+  const [logoFailed, setLogoFailed] = React.useState(false);
+
+  React.useEffect(() => setLogoFailed(false), [logoUrl]);
+
+  return (
+    <div
+      className="absolute left-2.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center overflow-hidden rounded-full border-2 border-white text-[10px] font-extrabold text-white shadow-sm dark:border-[#141a29]"
+      style={{ backgroundColor: avatar.color }}
+      title={title}
+      aria-hidden="true"
+    >
+      {avatar.initials}
+      {logoUrl && !logoFailed && (
+        <img
+          src={logoUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setLogoFailed(true)}
+          className="absolute inset-0 h-full w-full bg-white object-contain p-0.5"
+        />
+      )}
+    </div>
+  );
+}
 
 interface ItemListProps {
   currentPage: 'mail' | 'calendar' | 'contacts' | 'crm' | 'tasks' | 'notes' | 'dev';
@@ -560,7 +600,7 @@ export default function ItemList({
             const listParty = showRecipient
               ? (email.recipientEmail || email.recipientName || 'Kein Empfaenger')
               : email.sender;
-            const avatar = mailAvatar(listParty, showRecipient ? (email.recipientEmail || '') : email.senderEmail);
+            const avatarAddress = showRecipient ? (email.recipientEmail || '') : email.senderEmail;
             return (
               <div
                 id={`email-item-${email.id}`}
@@ -609,14 +649,11 @@ export default function ItemList({
                   <div className="absolute left-0 top-3 bottom-3 w-1 bg-[#0078d4] rounded-r-lg"></div>
                 )}
 
-                <div
-                  className="absolute left-2.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-[10px] font-extrabold text-white shadow-sm dark:border-[#141a29]"
-                  style={{ backgroundColor: avatar.color }}
+                <SenderAvatar
+                  party={listParty}
+                  address={avatarAddress}
                   title={showRecipient ? `Empfänger: ${listParty}` : `Absender: ${listParty}`}
-                  aria-hidden="true"
-                >
-                  {avatar.initials}
-                </div>
+                />
 
                 {/* Account Label tag if in Unified inbox */}
                 {selectedFolder === 'unified-inbox' && email.accountEmail && (

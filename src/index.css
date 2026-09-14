@@ -775,6 +775,36 @@ textarea:not(:disabled):not([readonly]),
   color: #d1fae5 !important;
 }
 
+/* Mail HTML is an external document. Keep its canvas light so authored colors remain readable. */
+.dark #mail-reading-pane .rich-email-frame {
+  background-color: #ffffff !important;
+  border-color: #3b4a63 !important;
+  color-scheme: light !important;
+}
+
+.dark #folder-context-menu,
+.dark #folder-action-modal form {
+  background-color: #111a2d !important;
+  border-color: #334155 !important;
+  color: #e5edf8 !important;
+}
+
+.dark #folder-context-menu > div,
+.dark #folder-action-modal form > div {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #b6c4d8 !important;
+}
+
+.dark #folder-context-menu button {
+  color: #e5edf8 !important;
+}
+
+.dark #folder-context-menu button:hover {
+  background-color: #203456 !important;
+  color: #ffffff !important;
+}
+
 .dark #mail-reading-pane .bg-amber-50 *,
 .dark #mail-reading-pane .bg-yellow-50 *,
 .dark #mail-reading-pane .bg-orange-50 *,
