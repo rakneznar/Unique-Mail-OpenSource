@@ -54,6 +54,10 @@ export interface KnownRecipient {
   lastUsedAt: string;
 }
 
+export type MailSearchScope = 'folder' | 'mailbox' | 'all-mailboxes';
+export type MailFilter = 'all' | 'unread' | 'attachments' | 'favorites' | 'pinned' | 'flagged' | 'important';
+export type MailSort = 'date-desc' | 'date-asc' | 'sender' | 'subject';
+
 export interface CalendarItemDraft {
   title: string;
   start: string;

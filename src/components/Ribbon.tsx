@@ -6,16 +6,17 @@
 import React from 'react';
 import AppLogo from './AppLogo';
 import { Category } from '../types';
+import { MailFilter, MailSearchScope, MailSort } from '../types';
 import { 
   Mail, MailOpen, Trash2, Archive, Reply, ReplyAll, Forward, Search, 
   RefreshCw, Wifi, WifiOff, FolderPlus, FolderOpen, 
   Plus, Settings, Layers, Milestone, Code, Cpu, ShieldAlert, Tag, Flag, Users, Undo2, Globe,
-  Sun, Moon, Zap, Pin, Star, Repeat2, Printer
+  Sun, Moon, Zap, Pin, Star, Repeat2, Printer, Paperclip, ListFilter, CalendarArrowDown, CalendarArrowUp, ArrowDownAZ
 } from 'lucide-react';
 
 interface RibbonProps {
   activeTab: string;
-  setActiveTab: (tab: 'start' | 'sync' | 'folder' | 'view' | 'dev' | 'options') => void;
+  setActiveTab: (tab: 'start' | 'sync' | 'folder' | 'view' | 'search' | 'dev' | 'options') => void;
   onNewEmail: () => void;
   onTriggerSync: () => void;
   isOffline: boolean;
@@ -61,6 +62,12 @@ interface RibbonProps {
   onManageCategories?: () => void;
   onDeleteCategoryGlobal?: (name: string) => void;
   onManageQuickSteps?: () => void;
+  mailSearchScope: MailSearchScope;
+  setMailSearchScope: (scope: MailSearchScope) => void;
+  mailFilter: MailFilter;
+  setMailFilter: (filter: MailFilter) => void;
+  mailSort: MailSort;
+  setMailSort: (sort: MailSort) => void;
 }
 
 export default function Ribbon({
@@ -109,7 +116,13 @@ export default function Ribbon({
   categoriesList,
   onManageCategories,
   onDeleteCategoryGlobal,
-  onManageQuickSteps
+  onManageQuickSteps,
+  mailSearchScope,
+  setMailSearchScope,
+  mailFilter,
+  setMailFilter,
+  mailSort,
+  setMailSort
 }: RibbonProps) {
   const [showCategoryDropdown, setShowCategoryDropdown] = React.useState(false);
   const buttonRef = React.useRef<HTMLButtonElement>(null);
@@ -271,6 +284,17 @@ export default function Ribbon({
             }`}
           >
             Ansicht
+          </button>
+
+          <button
+            onClick={() => { setCurrentPage('mail'); setActiveTab('search'); }}
+            className={`px-4 text-[11px] uppercase tracking-wide font-extrabold cursor-pointer transition-all flex items-center h-full rounded-t-lg ${
+              activeTab === 'search'
+                ? 'bg-white text-slate-900 border-t-2 border-[#0078d4] shadow-xs font-black'
+                : 'hover:bg-slate-200/50 text-slate-500 hover:text-slate-900'
+            }`}
+          >
+            Suchoptionen
           </button>
         </div>
       </div>
@@ -824,6 +848,79 @@ export default function Ribbon({
                 </button>
               </div>
               <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">Ausrichtung</div>
+            </div>
+          </div>
+        )}
+
+        {/* --- SEARCH OPTIONS TAB CONTROLS --- */}
+        {currentPage !== 'dev' && activeTab === 'search' && (
+          <div className="flex h-full items-stretch py-1.5 shrink-0">
+            <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
+              <div className="flex items-center gap-1.5">
+                {([
+                  ['folder', 'Aktueller Ordner'],
+                  ['mailbox', 'Aktuelles Postfach'],
+                  ['all-mailboxes', 'Alle Postfächer']
+                ] as Array<[MailSearchScope, string]>).map(([scope, label]) => (
+                  <button
+                    key={scope}
+                    type="button"
+                    onClick={() => setMailSearchScope(scope)}
+                    className={`flex h-14 w-24 flex-col items-center justify-center rounded-lg border px-2 text-[10px] font-bold leading-3 transition-colors ${mailSearchScope === scope ? 'border-[#0078d4] bg-blue-50 text-[#005a9e] shadow-sm' : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-100'}`}
+                  >
+                    <Search className="mb-1 h-4 w-4" />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">Suchbereich</div>
+            </div>
+
+            <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
+              <div className="grid grid-cols-4 gap-1">
+                {([
+                  ['all', 'Alle', ListFilter],
+                  ['unread', 'Ungelesen', MailOpen],
+                  ['attachments', 'Anlagen', Paperclip],
+                  ['favorites', 'Favoriten', Star],
+                  ['pinned', 'Angepinnt', Pin],
+                  ['flagged', 'Markiert', Flag],
+                  ['important', 'Wichtig', ShieldAlert]
+                ] as Array<[MailFilter, string, React.ComponentType<{ className?: string }>]>).map(([filter, label, Icon]) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setMailFilter(filter)}
+                    className={`flex h-7 min-w-20 items-center justify-center gap-1 rounded-md border px-2 text-[9.5px] font-bold transition-colors ${mailFilter === filter ? 'border-[#0078d4] bg-[#0078d4]/10 text-[#005a9e]' : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-100'}`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">Filtern</div>
+            </div>
+
+            <div className="flex flex-col items-center justify-between">
+              <div className="grid grid-cols-2 gap-1">
+                {([
+                  ['date-desc', 'Neueste', CalendarArrowDown],
+                  ['date-asc', 'Älteste', CalendarArrowUp],
+                  ['sender', 'Absender', ArrowDownAZ],
+                  ['subject', 'Betreff', ArrowDownAZ]
+                ] as Array<[MailSort, string, React.ComponentType<{ className?: string }>]>).map(([sort, label, Icon]) => (
+                  <button
+                    key={sort}
+                    type="button"
+                    onClick={() => setMailSort(sort)}
+                    className={`flex h-7 min-w-24 items-center justify-center gap-1 rounded-md border px-2 text-[9.5px] font-bold transition-colors ${mailSort === sort ? 'border-[#0078d4] bg-[#0078d4]/10 text-[#005a9e]' : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-100'}`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">Sortieren</div>
             </div>
           </div>
         )}

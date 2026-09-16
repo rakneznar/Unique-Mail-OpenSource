@@ -14,6 +14,7 @@ import { useComposePastePrompt } from './ComposePastePrompt';
 import { readEmlAttachmentsFromDrop } from '../utils/eml';
 import RecipientChipInput from './RecipientChipInput';
 import { looksLikeHtmlMailBody } from '../utils/mailBody';
+import { splitRecipientEntries } from '../utils/recipients';
 
 export interface ComposeAttachmentPayload {
   filename: string;
@@ -829,10 +830,7 @@ a{color:#0078d4;cursor:pointer}
     });
   };
 
-  const splitAddressList = (value?: string) => (value || '')
-    .split(/[;,]/)
-    .map(part => part.trim())
-    .filter(Boolean);
+  const splitAddressList = (value?: string) => splitRecipientEntries(value || '');
 
   const normalizeAddress = (value?: string) => {
     const match = String(value || '').match(/<([^>]+)>/);
@@ -861,13 +859,12 @@ a{color:#0078d4;cursor:pointer}
 
   type RecipientCandidate = { email: string; displayName: string; useCount: number; lastUsedAt: string };
   const recipientCandidates = React.useMemo<RecipientCandidate[]>(() => {
-    const ownAddresses = new Set(accountOptions.map(account => String(account.email || '').trim().toLowerCase()).filter(Boolean));
     const candidates = new Map<string, RecipientCandidate>();
     const addCandidate = (emailValue?: string, displayNameValue?: string, useCount = 0, lastUsedAt = '') => {
       const rawEmail = String(emailValue || '').trim();
       const bracketMatch = rawEmail.match(/<([^>]+)>/);
       const email = (bracketMatch ? bracketMatch[1] : rawEmail).trim().toLowerCase();
-      if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email) || ownAddresses.has(email)) return;
+      if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)) return;
       const inlineName = bracketMatch ? rawEmail.slice(0, bracketMatch.index).replace(/^['"]|['"]$/g, '').trim() : '';
       const displayName = String(displayNameValue || inlineName || '').trim();
       const existing = candidates.get(email);
@@ -880,6 +877,7 @@ a{color:#0078d4;cursor:pointer}
     };
 
     recipientHistory.forEach(item => addCandidate(item.email, item.displayName, item.useCount, item.lastUsedAt));
+    accountOptions.forEach(account => addCandidate(account.email, account.displayName || account.senderName || '', 2));
     contacts.forEach(contact => addCandidate(contact.email, `${contact.firstName || ''} ${contact.lastName || ''}`.trim(), 1));
     emails.forEach(email => {
       addCandidate(email.senderEmail, email.sender, 1, email.date);
@@ -958,6 +956,11 @@ a{color:#0078d4;cursor:pointer}
           activeEmail.senderEmail || activeEmail.sender,
           ...(composeMode === 'replyAll' ? splitAddressList(activeEmail.recipientEmail) : []),
         ], ownAddress);
+        if (composeMode === 'replyAll' && replyAllRecipients.length === 0) {
+          const selfAddress = [activeEmail.senderEmail, ...splitAddressList(activeEmail.recipientEmail)]
+            .find(address => normalizeAddress(address) === normalizeAddress(ownAddress));
+          if (selfAddress) replyAllRecipients.push(selfAddress);
+        }
         const replyAllCcRecipients = composeMode === 'replyAll'
           ? uniqueAddressList(splitAddressList(activeEmail.ccEmail), ownAddress).filter(address => !replyAllRecipients.some(toAddress => normalizeAddress(toAddress) === normalizeAddress(address)))
           : [];

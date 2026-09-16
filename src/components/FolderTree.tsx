@@ -148,6 +148,7 @@ export default function FolderTree({
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [draggedFolderKey, setDraggedFolderKey] = useState<string | null>(null);
   const [folderDropTargetKey, setFolderDropTargetKey] = useState<string | null>(null);
+  const [messageDropTargetKey, setMessageDropTargetKey] = useState<string | null>(null);
   const [pendingFolderDrop, setPendingFolderDrop] = useState<PendingFolderDrop | null>(null);
   const [folderMoveError, setFolderMoveError] = useState('');
   const [isMovingFolder, setIsMovingFolder] = useState(false);
@@ -555,6 +556,8 @@ export default function FolderTree({
     event.preventDefault();
     event.stopPropagation();
     setDraggedFolderKey(null);
+    setFolderDropTargetKey(null);
+    setMessageDropTargetKey(null);
     const rawFolderPayload = event.dataTransfer.getData('application/x-unique-mail-folder');
     if (rawFolderPayload) {
       try {
@@ -845,7 +848,21 @@ export default function FolderTree({
                             canModify: canMoveFolder(folder)
                           });
                         }}
-                        onDragOver={(e) => { if (folder.isSelectable !== false) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+                        onDragEnter={(event) => {
+                          if (folder.isSelectable === false) return;
+                          event.preventDefault();
+                          setMessageDropTargetKey(folderNodeKey(account.email, folder.id));
+                        }}
+                        onDragOver={(event) => {
+                          if (folder.isSelectable === false) return;
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
+                          setMessageDropTargetKey(folderNodeKey(account.email, folder.id));
+                        }}
+                        onDragLeave={(event) => {
+                          const nextTarget = event.relatedTarget as Node | null;
+                          if (!nextTarget || !event.currentTarget.contains(nextTarget)) setMessageDropTargetKey(null);
+                        }}
                         onDrop={(e) => handleFolderDrop(e, account.email, folder)}
                         draggable={false}
                         onPointerDown={(event) => handleFolderPointerDown(event, account.email, folder)}
@@ -855,8 +872,8 @@ export default function FolderTree({
                         className={`w-full text-left flex items-center justify-between px-3.5 py-1.5 text-xs rounded-lg transition-colors duration-75 ${canMoveFolder(folder) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
                           draggedFolderKey === folderNodeKey(account.email, folder.id)
                             ? 'opacity-45 border border-dashed border-[#0078d4] '
-                            : folderDropTargetKey === folderNodeKey(account.email, folder.id)
-                              ? 'bg-[#0078d4]/15 text-[#005a9e] ring-2 ring-[#0078d4]/60 ring-inset '
+                            : folderDropTargetKey === folderNodeKey(account.email, folder.id) || messageDropTargetKey === folderNodeKey(account.email, folder.id)
+                              ? 'bg-[#0078d4]/25 text-[#003f73] font-extrabold ring-2 ring-[#0078d4] ring-inset shadow-[0_0_0_2px_rgba(0,120,212,0.18),0_4px_12px_rgba(0,120,212,0.22)] scale-[1.015] '
                             : ''
                         }${
                           isSelected

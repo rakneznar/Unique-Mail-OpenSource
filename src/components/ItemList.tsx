@@ -7,9 +7,9 @@ import React from 'react';
 import { 
   Paperclip, Flag, Mail, MailOpen, AlertCircle, Search, UserCheck, 
   Clock, CheckSquare, Square, CalendarDays, SignalHigh, Check, FileCode,
-  Pin, Star, Trash2, Plus, X, Printer
+  Pin, Star, Trash2, Plus, X, Printer, ListFilter, CheckCircle2
 } from 'lucide-react';
-import { Email, Contact, Task, CalendarItem, Category } from '../types';
+import { Email, Contact, Task, CalendarItem, Category, MailFilter, MailSearchScope, MailSort } from '../types';
 import { addEmailsToDragData } from '../utils/eml';
 
 export type MailDateGroup = 'today' | 'yesterday' | 'dayBeforeYesterday' | 'lastWeek' | 'twoWeeksAgo' | 'older';
@@ -35,11 +35,13 @@ export const mailDateGroup = (dateValue: string, now = new Date()): MailDateGrou
   return 'older';
 };
 
-export const sortEmailsForDisplay = (emails: Email[]) => [...emails].sort((a, b) => {
+export const sortEmailsForDisplay = (emails: Email[], sort: MailSort = 'date-desc') => [...emails].sort((a, b) => {
   const pinA = a.isPinned ? 1 : 0;
   const pinB = b.isPinned ? 1 : 0;
   if (pinA !== pinB) return pinB - pinA;
-  if (pinA === 1) return new Date(b.date).getTime() - new Date(a.date).getTime();
+  if (sort === 'date-asc') return new Date(a.date).getTime() - new Date(b.date).getTime();
+  if (sort === 'sender') return String(a.sender || a.senderEmail).localeCompare(String(b.sender || b.senderEmail), 'de', { sensitivity: 'base' });
+  if (sort === 'subject') return String(a.subject).localeCompare(String(b.subject), 'de', { sensitivity: 'base' });
   const groupA = MAIL_DATE_GROUP_ORDER.indexOf(mailDateGroup(a.date));
   const groupB = MAIL_DATE_GROUP_ORDER.indexOf(mailDateGroup(b.date));
   if (groupA !== groupB) return groupA - groupB;
@@ -112,8 +114,13 @@ interface ItemListProps {
   setSelectedCalendarId: (id: string | null) => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  filterUnreadOnly: boolean;
-  setFilterUnreadOnly: (unreadOnly: boolean) => void;
+  mailSearchScope: MailSearchScope;
+  setMailSearchScope: (scope: MailSearchScope) => void;
+  mailFilter: MailFilter;
+  setMailFilter: (filter: MailFilter) => void;
+  mailSort: MailSort;
+  setMailSort: (sort: MailSort) => void;
+  onSearchFocus?: () => void;
   isDense?: boolean;
   language?: 'de' | 'en';
   dateDisplayFormat?: string;
@@ -161,8 +168,13 @@ export default function ItemList({
   setSelectedCalendarId,
   searchQuery,
   setSearchQuery,
-  filterUnreadOnly,
-  setFilterUnreadOnly,
+  mailSearchScope,
+  setMailSearchScope,
+  mailFilter,
+  setMailFilter,
+  mailSort,
+  setMailSort,
+  onSearchFocus,
   isDense = false,
   language = 'de',
   dateDisplayFormat = 'dd.MM.yyyy',
@@ -192,7 +204,7 @@ export default function ItemList({
 }: ItemListProps) {
   const [contextMenu, setContextMenu] = React.useState<{ x: number; y: number; emailId: string } | null>(null);
   const [newContactGroupLabel, setNewContactGroupLabel] = React.useState('');
-  const [activeFilterTab, setActiveFilterTab] = React.useState<'all' | 'unread' | 'favorites' | 'attachments'>('all');
+  const [showFilterMenu, setShowFilterMenu] = React.useState(false);
   const [selectedEmailIds, setSelectedEmailIds] = React.useState<string[]>([]);
   const [selectionAnchorId, setSelectionAnchorId] = React.useState<string | null>(null);
   const [mailListMetrics, setMailListMetrics] = React.useState({ scrollTop: 0, viewportHeight: 600 });
@@ -200,19 +212,18 @@ export default function ItemList({
   const listKeyboardRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    if (filterUnreadOnly) {
-      setActiveFilterTab('unread');
-    } else if (activeFilterTab === 'unread') {
-      setActiveFilterTab('all');
-    }
-  }, [filterUnreadOnly]);
-
-  React.useEffect(() => {
     setMailListMetrics(prev => ({ ...prev, scrollTop: 0 }));
     if (mailScrollRef.current) {
       mailScrollRef.current.scrollTop = 0;
     }
-  }, [currentPage, activeAccountEmail, selectedFolder, searchQuery, activeFilterTab, filterUnreadOnly]);
+  }, [currentPage, activeAccountEmail, selectedFolder, searchQuery, mailSearchScope, mailFilter, mailSort]);
+
+  React.useEffect(() => {
+    if (!showFilterMenu) return;
+    const close = () => setShowFilterMenu(false);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [showFilterMenu]);
 
   React.useEffect(() => {
     const target = mailScrollRef.current;
@@ -326,6 +337,8 @@ export default function ItemList({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => { if (currentPage === 'mail') onSearchFocus?.(); }}
+            onClick={() => { if (currentPage === 'mail') onSearchFocus?.(); }}
             placeholder={
               currentPage === 'mail' ? uiText.searchMail :
               currentPage === 'calendar' ? uiText.searchCalendar :
@@ -347,15 +360,14 @@ export default function ItemList({
       </div>
 
       {/* 2. Filter Tab Controls */}
-      <div className="h-10 bg-slate-50 dark:bg-[#0d1321] flex items-center justify-between px-3 border-b border-slate-200 dark:border-slate-800 text-[10.5px] select-none">
+      <div className="relative h-10 bg-slate-50 dark:bg-[#0d1321] flex items-center justify-between px-3 border-b border-slate-200 dark:border-slate-800 text-[10.5px] select-none">
         <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar">
           <button
             onClick={() => {
-              setActiveFilterTab('all');
-              setFilterUnreadOnly(false);
+              setMailFilter('all');
             }}
             className={`cursor-pointer font-bold tracking-wide uppercase text-[10px] transition-all select-none whitespace-nowrap px-2.5 py-1 rounded-md outline-none focus:outline-none ${
-              activeFilterTab === 'all'
+              mailFilter === 'all'
                 ? 'text-[#0078d4] bg-[#0078d4]/10 dark:bg-[#0078d4]/20 font-extrabold shadow-sm'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
             }`}
@@ -366,11 +378,10 @@ export default function ItemList({
           {currentPage === 'mail' && (
             <button
               onClick={() => {
-                setActiveFilterTab('unread');
-                setFilterUnreadOnly(true);
+                setMailFilter('unread');
               }}
               className={`cursor-pointer font-bold tracking-wide uppercase text-[10px] transition-all select-none whitespace-nowrap px-2.5 py-1 rounded-md outline-none focus:outline-none ${
-                activeFilterTab === 'unread'
+                mailFilter === 'unread'
                   ? 'text-[#0078d4] bg-[#0078d4]/10 dark:bg-[#0078d4]/20 font-extrabold shadow-sm'
                   : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
               }`}
@@ -382,11 +393,10 @@ export default function ItemList({
           {currentPage === 'mail' && (
             <button
               onClick={() => {
-                setActiveFilterTab('attachments');
-                setFilterUnreadOnly(false);
+                setMailFilter('attachments');
               }}
               className={`cursor-pointer font-bold tracking-wide uppercase text-[10px] transition-all flex items-center gap-1 select-none whitespace-nowrap px-2.5 py-1 rounded-md outline-none focus:outline-none ${
-                activeFilterTab === 'attachments'
+                mailFilter === 'attachments'
                   ? 'text-[#0078d4] bg-[#0078d4]/10 dark:bg-[#0078d4]/20 font-extrabold shadow-sm'
                   : 'text-slate-500 hover:text-[#0078d4] dark:text-slate-400 dark:hover:text-blue-400 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
               }`}
@@ -400,11 +410,10 @@ export default function ItemList({
           {currentPage === 'mail' && (
             <button
               onClick={() => {
-                setActiveFilterTab('favorites');
-                setFilterUnreadOnly(false);
+                setMailFilter('favorites');
               }}
               className={`cursor-pointer font-bold tracking-wide uppercase text-[10px] transition-all flex items-center space-x-1 select-none whitespace-nowrap px-2.5 py-1 rounded-md outline-none focus:outline-none ${
-                activeFilterTab === 'favorites'
+                mailFilter === 'favorites'
                   ? 'text-amber-600 bg-amber-500/10 dark:bg-amber-500/20 font-extrabold shadow-sm'
                   : 'text-slate-500 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-500 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
               }`}
@@ -414,9 +423,50 @@ export default function ItemList({
           )}
         </div>
         
-        <div className="flex items-center space-x-1.5 text-slate-400 dark:text-slate-400 text-[8.5px] font-mono tracking-wider font-extrabold shrink-0 uppercase select-none">
-          <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-          <span>Aktiv</span>
+        <div className="relative shrink-0" onClick={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => setShowFilterMenu(previous => !previous)}
+            className={`flex h-7 w-8 items-center justify-center rounded-md border transition-colors ${showFilterMenu || mailSearchScope !== 'folder' || mailFilter !== 'all' || mailSort !== 'date-desc' ? 'border-[#0078d4] bg-[#0078d4]/10 text-[#0078d4]' : 'border-slate-250 bg-white text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}
+            title="Filter- und Sortieroptionen"
+            aria-label="Filter- und Sortieroptionen"
+            aria-expanded={showFilterMenu}
+          >
+            <ListFilter className="h-4 w-4" />
+          </button>
+          {showFilterMenu && (
+            <div className="absolute right-0 top-8 z-[120] w-64 rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-2xl dark:border-slate-700 dark:bg-[#111a2d] dark:text-slate-100">
+              <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">Suchbereich</div>
+              {([
+                ['folder', 'Aktueller Ordner'],
+                ['mailbox', 'Aktuelles Postfach'],
+                ['all-mailboxes', 'Alle Postfächer']
+              ] as Array<[MailSearchScope, string]>).map(([scope, label]) => (
+                <button key={scope} type="button" onClick={() => { setMailSearchScope(scope); setShowFilterMenu(false); }} className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">
+                  <span>{label}</span>{mailSearchScope === scope && <CheckCircle2 className="h-3.5 w-3.5 text-[#0078d4]" />}
+                </button>
+              ))}
+              <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
+              <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">Filtern</div>
+              {([
+                ['all', 'Alle Nachrichten'], ['unread', 'Ungelesen'], ['attachments', 'Mit Anlagen'], ['favorites', 'Favoriten'],
+                ['pinned', 'Angepinnt'], ['flagged', 'Markiert'], ['important', 'Hohe Priorität']
+              ] as Array<[MailFilter, string]>).map(([filter, label]) => (
+                <button key={filter} type="button" onClick={() => { setMailFilter(filter); setShowFilterMenu(false); }} className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">
+                  <span>{label}</span>{mailFilter === filter && <CheckCircle2 className="h-3.5 w-3.5 text-[#0078d4]" />}
+                </button>
+              ))}
+              <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
+              <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">Sortieren</div>
+              {([
+                ['date-desc', 'Neueste zuerst'], ['date-asc', 'Älteste zuerst'], ['sender', 'Absender A-Z'], ['subject', 'Betreff A-Z']
+              ] as Array<[MailSort, string]>).map(([sort, label]) => (
+                <button key={sort} type="button" onClick={() => { setMailSort(sort); setShowFilterMenu(false); }} className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">
+                  <span>{label}</span>{mailSort === sort && <CheckCircle2 className="h-3.5 w-3.5 text-[#0078d4]" />}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -452,20 +502,28 @@ export default function ItemList({
             .filter(e => {
               const mailFolder = normalizeFolderKey(e.imapFolder || e.folder);
               
+              const effectiveScope: MailSearchScope = searchQuery.trim() ? mailSearchScope : 'folder';
+              if (effectiveScope === 'all-mailboxes') return true;
+
+              const emailAccount = (e.accountEmail || activeAccountEmail).toLowerCase();
+              const activeAccount = activeAccountEmail.toLowerCase();
+              if (effectiveScope === 'mailbox') return !activeAccount || emailAccount === activeAccount;
+
               // SUPPORT UNIFIED INBOX: Bypasses account specific filters for 'inbox' messages
               if (selectedFolder === 'unified-inbox') {
                 return mailFolder === 'inbox';
               }
               
-              const emailAccount = (e.accountEmail || activeAccountEmail).toLowerCase();
-              const activeAccount = activeAccountEmail.toLowerCase();
               return (!activeAccount || emailAccount === activeAccount) && folderMatches(e.imapFolder || e.folder, selectedFolder);
             })
             // Mail filters can be combined with the full-text search below.
             .filter(e => {
-              if (activeFilterTab === 'unread') return !e.isRead;
-              if (activeFilterTab === 'favorites') return !!e.isFavorite;
-              if (activeFilterTab === 'attachments') {
+              if (mailFilter === 'unread') return !e.isRead;
+              if (mailFilter === 'favorites') return !!e.isFavorite;
+              if (mailFilter === 'pinned') return !!e.isPinned;
+              if (mailFilter === 'flagged') return !!e.isFlagged;
+              if (mailFilter === 'important') return e.importance === 'high';
+              if (mailFilter === 'attachments') {
                 return !!e.hasAttachment || (e.attachments?.length || 0) > 0 || (e.draftAttachments?.length || 0) > 0;
               }
               return true;
@@ -475,6 +533,10 @@ export default function ItemList({
               matchesFullText([
                 e.sender, 
                 e.senderEmail, 
+                e.recipientEmail,
+                e.recipientName,
+                e.ccEmail,
+                e.bccEmail,
                 e.subject, 
                 e.body, 
                 e.preview, 
@@ -491,7 +553,7 @@ export default function ItemList({
             );
           }
 
-          const sortedEmails = sortEmailsForDisplay(filteredEmails);
+          const sortedEmails = sortEmailsForDisplay(filteredEmails, mailSort);
 
           const selectByIndex = (index: number, extend: boolean) => {
             const clamped = Math.max(0, Math.min(sortedEmails.length - 1, index));
@@ -514,14 +576,14 @@ export default function ItemList({
           const virtualRowHeight = isDense ? 82 : 88;
           const groupRowHeight = 34;
           const groupedRows: Array<{ type: 'group'; key: string; label: string; height: number } | { type: 'email'; key: string; email: Email; height: number }> = [];
-          let previousGroup: MailDateGroup | 'pinned' | null = null;
+          let previousGroup: MailDateGroup | 'pinned' | 'sorted' | null = null;
           sortedEmails.forEach(email => {
-            const group = email.isPinned ? 'pinned' : mailDateGroup(email.date);
+            const group = email.isPinned ? 'pinned' : mailSort === 'date-desc' ? mailDateGroup(email.date) : 'sorted';
             if (group !== previousGroup) {
               groupedRows.push({
                 type: 'group',
                 key: `group-${group}`,
-                label: group === 'pinned' ? uiText.pinned : uiText.dateGroups[group],
+                label: group === 'pinned' ? uiText.pinned : group === 'sorted' ? (language === 'en' ? 'Search results' : 'Suchergebnisse') : uiText.dateGroups[group],
                 height: groupRowHeight
               });
               previousGroup = group;

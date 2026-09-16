@@ -14,13 +14,13 @@ import ItemList from './components/ItemList';
 import ReadingPane, { ComposeMailPayload, ComposeMode } from './components/ReadingPane';
 import ArchTab from './components/ArchTab';
 import NotesView from './components/NotesView';
-import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, KnownRecipient } from './types';
+import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, KnownRecipient, MailFilter, MailSearchScope, MailSort } from './types';
 import AppLogo from './components/AppLogo';
 import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.5.60';
+const APP_VERSION = '0.5.61';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -227,7 +227,7 @@ const MAIL_DATE_FORMAT_OPTIONS = [
 export default function App() {
   // Page switching & Ribbon active tab - defaulted to mail inbox per security directives
   const [currentPage, setCurrentPage] = useState<AppPage>('mail');
-  const [activeTab, setActiveTab] = useState<'start' | 'sync' | 'folder' | 'view' | 'dev' | 'options'>('start');
+  const [activeTab, setActiveTab] = useState<'start' | 'sync' | 'folder' | 'view' | 'search' | 'dev' | 'options'>('start');
   const backgroundJobsRef = useRef<BackgroundJob[]>([]);
   const backgroundJobPromisesRef = useRef<Map<string, Promise<unknown>>>(new Map());
   const backgroundWorkerRunningRef = useRef(false);
@@ -1880,7 +1880,9 @@ exit`;
   const restoredComposeDraftRef = useRef(false);
   const draftOriginalsRef = useRef<Map<string, Email>>(new Map());
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [filterUnreadOnly, setFilterUnreadOnly] = useState<boolean>(false);
+  const [mailSearchScope, setMailSearchScope] = useState<MailSearchScope>('folder');
+  const [mailFilter, setMailFilter] = useState<MailFilter>('all');
+  const [mailSort, setMailSort] = useState<MailSort>('date-desc');
   const [selectedFolder, setSelectedFolder] = useState<string>('inbox');
 
   // Follow-up Wiedervorlage states & handlers
@@ -2469,10 +2471,14 @@ exit`;
     ));
   };
   const rememberMessageRecipients = (message: ComposeMailPayload) => {
-    const ownAddresses = new Set(accounts.map(account => String(account.email || '').trim().toLowerCase()).filter(Boolean));
     const usedAt = new Date().toISOString();
     const parsed = [...parseRecipientAddressList(message.to), ...parseRecipientAddressList(message.cc), ...parseRecipientAddressList(message.bcc)]
-      .filter(entry => !ownAddresses.has(entry.email));
+      .map(entry => {
+        const ownAccount = accounts.find(account => account.email.toLowerCase() === entry.email);
+        return ownAccount && !entry.displayName
+          ? { ...entry, displayName: getAccountDisplayName(ownAccount) }
+          : entry;
+      });
     if (parsed.length === 0) return;
     setRecipientHistory(previous => {
       const byEmail = new Map<string, KnownRecipient>(previous.map(item => [item.email.toLowerCase(), item]));
@@ -4418,6 +4424,12 @@ exit`;
         onManageCategories={() => setShowCategoriesModal(true)}
         onDeleteCategoryGlobal={handleDeleteCategoryGlobal}
         onManageQuickSteps={() => setShowQuickStepsModal(true)}
+        mailSearchScope={mailSearchScope}
+        setMailSearchScope={setMailSearchScope}
+        mailFilter={mailFilter}
+        setMailFilter={setMailFilter}
+        mailSort={mailSort}
+        setMailSort={setMailSort}
       />
 
       {/* 2. Main Workspace Layout Area */}
@@ -4665,8 +4677,13 @@ exit`;
               setSelectedCalendarId={setSelectedCalendarId}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
-              filterUnreadOnly={filterUnreadOnly}
-              setFilterUnreadOnly={setFilterUnreadOnly}
+              mailSearchScope={mailSearchScope}
+              setMailSearchScope={setMailSearchScope}
+              mailFilter={mailFilter}
+              setMailFilter={setMailFilter}
+              mailSort={mailSort}
+              setMailSort={setMailSort}
+              onSearchFocus={() => setActiveTab('search')}
               isDense={isDense}
               activeAccountEmail={activeAccountEmail}
               selectedFolder={selectedFolder}
