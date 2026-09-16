@@ -20,7 +20,7 @@ import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.5.59';
+const APP_VERSION = '0.5.60';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -92,6 +92,20 @@ const DEFAULT_CONTACT_SORT_LABELS = ['Newsletter', 'Privat', 'Beruflich'];
 const DEFAULT_MAIL_DATE_FORMAT = 'dd.MM.yyyy';
 const RECIPIENT_HISTORY_STORAGE_KEY = 'uniquemail_recipient_history';
 const PENDING_MAIL_MUTATIONS_STORAGE_KEY = 'uniquemail_pending_mail_mutations_v1';
+const PINNED_MAIL_KEYS_STORAGE_KEY = 'uniquemail_pinned_mail_keys_v1';
+
+const mailPinIdentityKeys = (mail: Email) => {
+  const account = String(mail.accountEmail || '').trim().toLowerCase();
+  const folder = String(mail.imapFolder || mail.folder || '').trim().replace(/\\/g, '/').toLowerCase();
+  const uid = Number(mail.imapUid || 0);
+  const uidValidity = String(mail.imapUidValidity || '').trim();
+  const fingerprint = [account, String(mail.senderEmail || '').trim().toLowerCase(), String(mail.subject || '').trim(), String(mail.date || '').trim()].join('|');
+  return Array.from(new Set([
+    mail.id ? `id:${mail.id}` : '',
+    uid > 0 ? `imap:${account}|${folder}|${uidValidity}|${uid}` : '',
+    fingerprint !== '|||' ? `mail:${fingerprint}` : ''
+  ].filter(Boolean)));
+};
 
 const compactMutationMail = (mail: Email): Email => ({
   id: mail.id,
@@ -1619,6 +1633,10 @@ exit`;
   // Local Database and Caching state with LocalStorage persistence
   const [emails, setEmails] = useState<Email[]>([]);
   const [browserMailCacheLoaded, setBrowserMailCacheLoaded] = useState(false);
+  const pinnedMailKeysRef = useRef<Set<string>>(new Set(readJsonStorage<string[]>(PINNED_MAIL_KEYS_STORAGE_KEY, [])));
+  const applyPersistedPin = (mail: Email): Email => mailPinIdentityKeys(mail).some(key => pinnedMailKeysRef.current.has(key))
+    ? { ...mail, isPinned: true }
+    : mail;
 
   useEffect(() => {
     let cancelled = false;
@@ -1627,7 +1645,10 @@ exit`;
       timeoutId = window.setTimeout(() => {
         if (cancelled) return;
         const cachedEmails = readJsonStorage<Email[]>('outlook_emails', []);
-        setEmails(Array.isArray(cachedEmails) ? cachedEmails : []);
+        const restoredEmails = Array.isArray(cachedEmails) ? cachedEmails : [];
+        restoredEmails.filter(mail => mail.isPinned).forEach(mail => mailPinIdentityKeys(mail).forEach(key => pinnedMailKeysRef.current.add(key)));
+        localStorage.setItem(PINNED_MAIL_KEYS_STORAGE_KEY, JSON.stringify(Array.from(pinnedMailKeysRef.current)));
+        setEmails(restoredEmails.map(applyPersistedPin));
         setBrowserMailCacheLoaded(true);
       }, 50);
     });
@@ -2905,7 +2926,7 @@ exit`;
     const accountLower = accountEmail.toLowerCase();
     const authoritativeFolderSnapshot = Array.isArray(serverFolders);
     const failedFolderKeys = new Set(failedFolders.map(normalizeMailFolderKey));
-    const guardedSyncedEmails = syncedEmails.map(guardBlockedSenderMail);
+    const guardedSyncedEmails = syncedEmails.map(mail => applyPersistedPin(guardBlockedSenderMail(mail)));
     const incomingById = new Map(guardedSyncedEmails.map(mail => [mail.id, mail]));
     const merged = previous.map(mail => {
       const owner = (mail.accountEmail || '').toLowerCase();
@@ -4186,7 +4207,13 @@ exit`;
   const toggleEmailPinById = (id: string) => {
     const target = emails.find(e => e.id === id);
     if (!target) return;
-    setEmails(prev => prev.map(e => e.id === id ? { ...e, isPinned: !e.isPinned } : e));
+    const nextPinned = !target.isPinned;
+    const keys = mailPinIdentityKeys(target);
+    if (nextPinned) keys.forEach(key => pinnedMailKeysRef.current.add(key));
+    else keys.forEach(key => pinnedMailKeysRef.current.delete(key));
+    localStorage.setItem(PINNED_MAIL_KEYS_STORAGE_KEY, JSON.stringify(Array.from(pinnedMailKeysRef.current)));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+    setEmails(prev => prev.map(e => e.id === id ? { ...e, isPinned: nextPinned } : e));
     triggerPostActionSync('Markierung geändert', [target]);
   };
 

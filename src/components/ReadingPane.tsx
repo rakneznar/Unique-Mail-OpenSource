@@ -137,6 +137,20 @@ export default function ReadingPane({
   
   // Clipboard copy helper
   const [copiedText, setCopiedText] = useState<string | null>(null);
+  const [imageCopyNotice, setImageCopyNotice] = useState<{
+    message: string;
+    tone: 'success' | 'warning' | 'error';
+  } | null>(null);
+  const imageCopyNoticeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showImageCopyNotice = (message: string, tone: 'success' | 'warning' | 'error' = 'success') => {
+    if (imageCopyNoticeTimerRef.current) clearTimeout(imageCopyNoticeTimerRef.current);
+    setImageCopyNotice({ message, tone });
+    imageCopyNoticeTimerRef.current = setTimeout(() => {
+      setImageCopyNotice(null);
+      imageCopyNoticeTimerRef.current = null;
+    }, 2200);
+  };
   const handleCopyCode = (code: string, id: string) => {
     navigator.clipboard.writeText(code);
     setCopiedText(id);
@@ -368,14 +382,14 @@ a{color:#0078d4;cursor:pointer}
       await navigator.clipboard.write([
         new ClipboardItem({ [blob.type]: blob })
       ]);
-      alert('Bild erfolgreich in Ihre Windows/Mac Zwischenablage kopiert! Sie können es nun mit Strg + V in Word, Outlook oder Paint einfügen.');
+      showImageCopyNotice('Bild in die Zwischenablage kopiert');
     } catch (e) {
       // Fallback: Copy Image URL if clipboard fetch blocks
       try {
         await navigator.clipboard.writeText(url);
-        alert('Bild-Adresse kopiert! (Sicherheits-Fallback der Browser API)');
+        showImageCopyNotice('Bildadresse in die Zwischenablage kopiert', 'warning');
       } catch (err) {
-        alert('Zwischenablage blockiert. Kopieren Sie das Bild manuell.');
+        showImageCopyNotice('Kopieren wurde von Windows blockiert', 'error');
       }
     }
   };
@@ -527,6 +541,7 @@ a{color:#0078d4;cursor:pointer}
   React.useEffect(() => () => {
     mailBodyFrameCleanupRef.current?.();
     cancelImageActionHide();
+    if (imageCopyNoticeTimerRef.current) clearTimeout(imageCopyNoticeTimerRef.current);
   }, []);
 
   // General click handler dismisses active contextual popup overlays
@@ -1199,7 +1214,7 @@ a{color:#0078d4;cursor:pointer}
         {/* Dynamic Rich Text Format Bar inside compose area */}
         <div className="p-4 px-5 space-y-3 flex-1 flex flex-col bg-white dark:bg-[#0f172a] min-h-[350px]">
           {/* Classic Outlook Format Ribbon Toolbar */}
-          <div className="bg-slate-50 dark:bg-[#1e293b]/70 border border-slate-220 dark:border-[#334155] rounded-t-xl p-2.5 flex flex-wrap items-center gap-1.5 select-none shrink-0 shadow-inner-sm">
+          <div id="compose-format-toolbar" className="bg-slate-50 dark:bg-[#1e293b]/70 border border-slate-220 dark:border-[#334155] rounded-t-xl p-2.5 flex flex-wrap items-center gap-1.5 select-none shrink-0 shadow-inner-sm">
             <span className="text-[9px] font-extrabold uppercase text-slate-400 px-1">Schrift</span>
             <button
               type="button"
@@ -1318,6 +1333,7 @@ a{color:#0078d4;cursor:pointer}
 
           {/* Interactive Composition Zone */}
           <div 
+            id="compose-rich-editor"
             ref={editorRef}
             contentEditable
             onPaste={handleComposePaste}
@@ -1918,6 +1934,25 @@ a{color:#0078d4;cursor:pointer}
               <span>Copy Kopieren (Strg+C)</span>
             </button>
           </div>
+        )}
+
+        {imageCopyNotice && createPortal(
+          <div
+            id="image-copy-toast"
+            role="status"
+            aria-live="polite"
+            className={`fixed bottom-8 left-1/2 z-[10100] flex items-center gap-2 rounded-lg border px-4 py-2.5 text-[12px] font-bold shadow-2xl ${
+              imageCopyNotice.tone === 'success'
+                ? 'border-emerald-300 bg-emerald-600 text-white'
+                : imageCopyNotice.tone === 'warning'
+                  ? 'border-amber-300 bg-amber-500 text-slate-950'
+                  : 'border-red-300 bg-red-600 text-white'
+            }`}
+          >
+            {imageCopyNotice.tone === 'success' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            <span>{imageCopyNotice.message}</span>
+          </div>,
+          document.body
         )}
 
         {/* Custom Rich Image Context Menu Options popup */}

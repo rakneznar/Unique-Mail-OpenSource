@@ -83,6 +83,25 @@ textarea:not(:disabled):not([readonly]),
   animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes imageCopyToastIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.96);
+  }
+  18%, 82% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -6px) scale(0.98);
+  }
+}
+
+#image-copy-toast {
+  animation: imageCopyToastIn 2.2s ease both;
+}
+
 /* ================= PRESTIGE TWILIGHT DARK MODE IMPLEMENTATION ================= */
 .dark body {
   background-color: #0d1321 !important;
@@ -182,6 +201,13 @@ textarea:not(:disabled):not([readonly]),
 .dark #folder-tree-sidebar button:hover,
 .dark #folder-tree-sidebar .hover\:bg-slate-100 {
   background-color: #1e293b !important;
+}
+
+.dark #folder-tree-sidebar .text-slate-600,
+.dark #folder-tree-sidebar .text-slate-500,
+.dark #folder-tree-sidebar .text-slate-450,
+.dark #folder-tree-sidebar .text-slate-400 {
+  color: #afbed2 !important;
 }
 
 /* Middle List Items Container (ItemList.tsx) */
@@ -310,6 +336,70 @@ textarea:not(:disabled):not([readonly]),
 .dark #task-details-pane .bg-slate-50\/25 {
   background-color: #101626 !important;
   border-color: #1e293b !important;
+}
+
+.dark #new-email-writer {
+  background-color: #070d18 !important;
+}
+
+.dark #new-email-writer input,
+.dark #new-email-writer select {
+  background-color: #111c2f !important;
+  border-color: #41516c !important;
+  color: #f8fafc !important;
+}
+
+.dark #new-email-writer input::placeholder {
+  color: #93a4ba !important;
+  opacity: 1 !important;
+}
+
+.dark #new-email-writer label,
+.dark #new-email-writer label > span,
+.dark #new-email-writer .text-slate-600,
+.dark #new-email-writer .text-slate-500,
+.dark #new-email-writer .text-slate-450,
+.dark #new-email-writer .text-slate-400,
+.dark #new-email-writer .text-slate-350 {
+  color: #bdcbe0 !important;
+}
+
+.dark #compose-format-toolbar {
+  background-color: #111c2f !important;
+  border-color: #41516c !important;
+}
+
+.dark #compose-format-toolbar button:not(.text-red-500) {
+  color: #dbeafe !important;
+  opacity: 1 !important;
+}
+
+.dark #compose-format-toolbar button:hover {
+  background-color: #24334b !important;
+}
+
+.dark #compose-rich-editor {
+  background-color: #0d1728 !important;
+  border-color: #41516c !important;
+  color: #f8fafc !important;
+  caret-color: #7dd3fc !important;
+}
+
+.dark #compose-rich-editor :where(div, p, span, font, strong, b, em, i, li, blockquote),
+.dark #compose-rich-editor [data-unique-mail-signature],
+.dark #compose-rich-editor [data-unique-mail-quote] {
+  color: #e5edf8 !important;
+  border-color: #52627a !important;
+}
+
+.dark #compose-rich-editor a,
+.dark #compose-rich-editor a * {
+  color: #7dd3fc !important;
+}
+
+.dark #compose-action-bar {
+  background-color: #0a1220 !important;
+  border-color: #334155 !important;
 }
 
 /* Body / content blocks inside reading panes */

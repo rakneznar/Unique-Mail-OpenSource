@@ -673,6 +673,9 @@ export default function ItemList({
                     {email.isFavorite && (
                       <Star className="w-3.5 h-3.5 shrink-0 fill-yellow-400 text-yellow-500" title="Favorit" aria-label="Favorit" />
                     )}
+                    {email.isPinned && (
+                      <Pin className="h-3.5 w-3.5 shrink-0 rotate-45 fill-amber-500 text-amber-600" title="Angepinnt" aria-label="Angepinnt" />
+                    )}
                     <span className="text-[9px] text-slate-400 font-mono font-semibold text-right min-w-[74px]">
                       {formatDate(email.date)}
                     </span>
