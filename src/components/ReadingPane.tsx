@@ -433,6 +433,7 @@ a{color:#0078d4;cursor:pointer}
     };
     const handleClick = (event: MouseEvent) => {
       const target = targetElement(event);
+      setImageContextMenu(null);
       const link = target?.closest('a[href]') as HTMLAnchorElement | null;
       if (link) {
         event.preventDefault();
@@ -447,7 +448,14 @@ a{color:#0078d4;cursor:pointer}
       }
 
       const image = target?.closest('img') as HTMLImageElement | null;
-      if (!image) return;
+      if (!image) {
+        setImageActionPopup(null);
+        frameDocument.querySelectorAll('img[data-unique-mail-selected]').forEach((item) => {
+          (item as HTMLImageElement).style.outline = 'none';
+          item.removeAttribute('data-unique-mail-selected');
+        });
+        return;
+      }
       event.stopPropagation();
       frameDocument.querySelectorAll('img[data-unique-mail-selected]').forEach((item) => {
         (item as HTMLImageElement).style.outline = 'none';

@@ -791,10 +791,6 @@ textarea:not(:disabled):not([readonly]),
   opacity: 1 !important;
 }
 
-.dark #item-list-container [id^="email-item-"] * {
-  opacity: 1 !important;
-}
-
 .dark #item-list-container [id^="email-item-"]:hover {
   background-color: #17233a !important;
   border-color: #3b82f6 !important;

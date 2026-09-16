@@ -18,9 +18,9 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, 
 import AppLogo from './components/AppLogo';
 import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
-import { ShieldAlert, RefreshCw, Layers, Plus, Mail, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
+import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
 
-const APP_VERSION = '0.5.61';
+const APP_VERSION = '0.5.62';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -971,7 +971,7 @@ exit`;
   // Spacing & options states
   const [isDense, setIsDense] = useState<boolean>(false);
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState<boolean>(false);
-  const [optionsActiveTab, setOptionsActiveTab] = useState<'general' | 'language' | 'accounts' | 'security' | 'ai' | 'help' | 'vacation' | 'signature'>('general');
+  const [optionsActiveTab, setOptionsActiveTab] = useState<'general' | 'appearance' | 'language' | 'accounts' | 'security' | 'images' | 'ai' | 'help' | 'vacation' | 'signature'>('general');
   const [autoMarkAsReadOnOpen, setAutoMarkAsReadOnOpen] = useState<boolean>(() => localStorage.getItem('uniquemail_auto_mark_read_on_open') !== 'false');
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(() => localStorage.getItem('uniquemail_ui_language') === 'en' ? 'en' : 'de');
   const [mailDateFormat, setMailDateFormat] = useState<string>(() => localStorage.getItem('uniquemail_mail_date_format') || DEFAULT_MAIL_DATE_FORMAT);
@@ -995,6 +995,7 @@ exit`;
   const [imageDownloadDenyList, setImageDownloadDenyList] = useState<string[]>(() => readSenderList('uniquemail_image_deny_senders'));
   const [blockedSenderList, setBlockedSenderList] = useState<string[]>(() => readSenderList('uniquemail_blocked_senders'));
   const [appLockConfig, setAppLockConfig] = useState<AppLockConfig | null>(() => readStoredAppLockConfig());
+  const [appLockEnabledDraft, setAppLockEnabledDraft] = useState<boolean>(() => !!readStoredAppLockConfig()?.enabled);
   const [isAppUnlocked, setIsAppUnlocked] = useState<boolean>(() => !readStoredAppLockConfig());
   const [appUnlockPassword, setAppUnlockPassword] = useState<string>('');
   const [appUnlockError, setAppUnlockError] = useState<string>('');
@@ -1005,6 +1006,10 @@ exit`;
   const securitySettingsImportInputRef = React.useRef<HTMLInputElement>(null);
   const [settingsBackupPassword, setSettingsBackupPassword] = useState<string>('');
   const [settingsBackupPasswordConfirm, setSettingsBackupPasswordConfirm] = useState<string>('');
+  const [mailActionBarColor, setMailActionBarColor] = useState<string>(() => {
+    const stored = localStorage.getItem('uniquemail_mail_action_bar_color') || '#ffffff';
+    return /^#[0-9a-f]{6}$/i.test(stored) ? stored : '#ffffff';
+  });
 
   const isSenderBlockedAddress = (sender?: string) => blockedSenderList.some(entry => normalizeSenderAddress(entry) === normalizeSenderAddress(sender));
   const guardBlockedSenderMail = (mail: Email): Email => isSenderBlockedAddress(mail.senderEmail)
@@ -1070,6 +1075,7 @@ exit`;
     const salt = createAppLockSalt();
     const hash = await hashAppLockPassword(nextPassword, salt);
     setAppLockConfig({ enabled: true, salt, hash, updatedAt: new Date().toISOString() });
+    setAppLockEnabledDraft(true);
     setIsAppUnlocked(true);
     setAppLockCurrentPassword('');
     setAppLockNewPassword('');
@@ -1085,10 +1091,28 @@ exit`;
       return;
     }
     setAppLockConfig(null);
+    setAppLockEnabledDraft(false);
     setAppLockCurrentPassword('');
     setAppLockNewPassword('');
     setAppLockConfirmPassword('');
     setAppLockStatus('App-Passwort wurde entfernt.');
+  };
+
+  const handleApplyAppLockSettings = async () => {
+    setAppLockStatus('');
+    if (!appLockEnabledDraft) {
+      if (!appLockConfig?.enabled) {
+        setAppLockStatus('Der Passwortschutz ist deaktiviert.');
+        return;
+      }
+      await handleRemoveAppLockPassword();
+      return;
+    }
+    if (appLockConfig?.enabled && !appLockNewPassword.trim() && !appLockConfirmPassword.trim()) {
+      setAppLockStatus('Der Passwortschutz ist bereits aktiv. Geben Sie nur dann ein neues Passwort ein, wenn Sie es ändern möchten.');
+      return;
+    }
+    await handleSaveAppLockPassword();
   };
 
   const extractSenderAddress = (mail: Partial<Email>) => {
@@ -1218,7 +1242,8 @@ exit`;
           isDense,
           mailDateFormat,
           attachmentDownloadDirectory,
-          contactSortLabels
+          contactSortLabels,
+          mailActionBarColor
         },
         accounts: sanitizeExportedAccounts(accounts),
         activeAccountEmail,
@@ -1283,9 +1308,11 @@ exit`;
       const importedAppLock = security?.appLock;
       if (importedAppLock?.enabled && typeof importedAppLock.salt === 'string' && typeof importedAppLock.hash === 'string') {
         setAppLockConfig({ enabled: true, salt: importedAppLock.salt, hash: importedAppLock.hash, updatedAt: importedAppLock.updatedAt });
+        setAppLockEnabledDraft(true);
         setIsAppUnlocked(true);
       } else if (security && Object.prototype.hasOwnProperty.call(security, 'appLock') && !importedAppLock) {
         setAppLockConfig(null);
+        setAppLockEnabledDraft(false);
       }
 
       const nativeApi = (window as any).uniqueMailNative;
@@ -1332,6 +1359,9 @@ exit`;
       }
       if (settings?.general && typeof settings.general.attachmentDownloadDirectory === 'string') {
         setAttachmentDownloadDirectory(settings.general.attachmentDownloadDirectory);
+      }
+      if (settings?.general && typeof settings.general.mailActionBarColor === 'string' && /^#[0-9a-f]{6}$/i.test(settings.general.mailActionBarColor)) {
+        setMailActionBarColor(settings.general.mailActionBarColor);
       }
       if (settings?.general && Array.isArray(settings.general.contactSortLabels)) {
         const importedLabels = settings.general.contactSortLabels.map((item: any) => String(item || '').trim()).filter(Boolean);
@@ -1455,11 +1485,16 @@ exit`;
   useEffect(() => {
     if (appLockConfig?.enabled) {
       localStorage.setItem('uniquemail_app_lock_config', JSON.stringify(appLockConfig));
+      setAppLockEnabledDraft(true);
     } else {
       localStorage.removeItem('uniquemail_app_lock_config');
       setIsAppUnlocked(true);
     }
   }, [appLockConfig]);
+  useEffect(() => {
+    localStorage.setItem('uniquemail_mail_action_bar_color', mailActionBarColor);
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+  }, [mailActionBarColor]);
   useEffect(() => {
     localStorage.setItem('uniquemail_signature_active', signatureActive.toString());
   }, [signatureActive]);
@@ -4325,7 +4360,7 @@ exit`;
   const handleVerifyPassword = async () => {
     const trimmed = pwdValue.trim();
     if (!appLockConfig?.enabled) {
-      setPwdError('Bitte richten Sie zuerst unter Einstellungen > Allgemein ein App-Passwort ein.');
+      setPwdError('Bitte aktivieren Sie zuerst unter Einstellungen > Sicherheit den Passwortschutz.');
       return;
     }
     const enteredHash = await hashAppLockPassword(trimmed, appLockConfig.salt);
@@ -4406,7 +4441,14 @@ exit`;
         userEmail={activeAccountEmail}
         isDense={isDense}
         setIsDense={setIsDense}
-        onOpenOptions={() => setIsOptionsModalOpen(true)}
+        onOpenOptions={() => {
+          setAppLockEnabledDraft(!!appLockConfig?.enabled);
+          setAppLockCurrentPassword('');
+          setAppLockNewPassword('');
+          setAppLockConfirmPassword('');
+          setAppLockStatus('');
+          setIsOptionsModalOpen(true);
+        }}
         isSyncing={isSyncing}
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
@@ -4710,6 +4752,7 @@ exit`;
               contactSortLabels={contactSortLabels}
               onContactSortLabelsChange={setContactSortLabels}
               onNewContact={handleNewContact}
+              mailActionBarColor={mailActionBarColor}
             />
 
             {/* Column 3: Rich detail viewer reading pane */}
@@ -4824,7 +4867,7 @@ exit`;
             {/* Content body split left/right */}
             <div className="flex-1 flex overflow-hidden">
               {/* Left sidebar nav tabs */}
-              <div className="w-56 bg-slate-100 border-r border-slate-200 flex flex-col p-3 space-y-1.5 select-none shrink-0 justify-between">
+              <div className="w-56 bg-slate-100 border-r border-slate-200 flex flex-col p-3 space-y-1.5 select-none shrink-0 justify-between overflow-y-auto">
                 <div className="space-y-1.5">
                   <button 
                     onClick={() => setOptionsActiveTab('general')}
@@ -4835,7 +4878,18 @@ exit`;
                     }`}
                   >
                     Allgemein
-                  </button>                  <button 
+                  </button>
+                  <button
+                    onClick={() => setOptionsActiveTab('appearance')}
+                    className={`w-full text-left px-3.5 py-2 rounded-xl transition-all font-bold text-[11px] cursor-pointer ${
+                      optionsActiveTab === 'appearance'
+                        ? 'bg-white text-cyan-950 shadow-xs border-l-3 border-l-cyan-500'
+                        : 'text-slate-600 hover:bg-slate-200/60'
+                    }`}
+                  >
+                    Darstellung
+                  </button>
+                  <button
                     onClick={() => setOptionsActiveTab('language')}
                     className={`w-full text-left px-3.5 py-2 rounded-xl transition-all font-bold text-[11px] cursor-pointer ${
                       optionsActiveTab === 'language'
@@ -4860,6 +4914,16 @@ exit`;
                     className={`w-full text-left px-3.5 py-2 rounded-xl transition-all font-bold text-[11px] cursor-pointer ${
                       optionsActiveTab === 'security'
                         ? 'bg-white text-red-950 shadow-xs border-l-3 border-l-red-500'
+                        : 'text-slate-600 hover:bg-slate-200/60'
+                    }`}
+                  >
+                    Sicherheit
+                  </button>
+                  <button
+                    onClick={() => setOptionsActiveTab('images')}
+                    className={`w-full text-left px-3.5 py-2 rounded-xl transition-all font-bold text-[11px] cursor-pointer ${
+                      optionsActiveTab === 'images'
+                        ? 'bg-white text-amber-950 shadow-xs border-l-3 border-l-amber-500'
                         : 'text-slate-600 hover:bg-slate-200/60'
                     }`}
                   >
@@ -4911,9 +4975,6 @@ exit`;
                   <button className="text-left px-3.5 py-2 rounded-xl text-slate-400 text-[11px] opacity-70 cursor-not-allowed font-medium">
                     WPF Frontend (STA)
                   </button>
-                  <button className="text-left px-3.5 py-2 rounded-xl text-slate-400 text-[11px] opacity-70 cursor-not-allowed font-medium">
-                    Sicherheit & SPF
-                  </button>
                 </div>
                 <div className="p-2 border-t border-slate-200 text-[9px] text-slate-500 font-mono font-bold leading-relaxed">
                   Unique Mail v{APP_VERSION}<br />
@@ -4944,72 +5005,6 @@ exit`;
                           <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0078d4]"></div>
                         </label>
                       </div>
-                    </div>
-
-                    <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/50 p-4 shadow-sm">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest">App-Passwort und Zugangsschutz</h3>
-                          <p className="mt-1 text-[11px] font-semibold text-slate-500 leading-5">
-                            Legen Sie ein App-Passwort fest. Beim Öffnen von Unique Mail wird es einmalig abgefragt.
-                          </p>
-                        </div>
-                        <span className={
-                          appLockConfig?.enabled
-                            ? 'rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-extrabold uppercase text-emerald-700'
-                            : 'rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-extrabold uppercase text-slate-500'
-                        }>
-                          {appLockConfig?.enabled ? 'Aktiv' : 'Inaktiv'}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        {appLockConfig?.enabled && (
-                          <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
-                            Aktuelles Passwort
-                            <input
-                              type="password"
-                              value={appLockCurrentPassword}
-                              onChange={(event) => setAppLockCurrentPassword(event.target.value)}
-                              className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0078d4] focus:ring-2 focus:ring-blue-100"
-                            />
-                          </label>
-                        )}
-                        <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
-                          Neues Passwort
-                          <input
-                            type="password"
-                            value={appLockNewPassword}
-                            onChange={(event) => setAppLockNewPassword(event.target.value)}
-                            placeholder="mind. 4 Zeichen"
-                            className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0078d4] focus:ring-2 focus:ring-blue-100"
-                          />
-                        </label>
-                        <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
-                          Wiederholen
-                          <input
-                            type="password"
-                            value={appLockConfirmPassword}
-                            onChange={(event) => setAppLockConfirmPassword(event.target.value)}
-                            className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0078d4] focus:ring-2 focus:ring-blue-100"
-                          />
-                        </label>
-                      </div>
-
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
-                        <p className="text-[10.5px] font-semibold text-slate-500">Erlaubt sind Buchstaben und Zahlen, mindestens 4 Zeichen.</p>
-                        <div className="flex items-center gap-2">
-                          {appLockConfig?.enabled && (
-                            <button type="button" onClick={handleRemoveAppLockPassword} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-extrabold text-red-700 hover:bg-red-100">
-                              Passwort entfernen
-                            </button>
-                          )}
-                          <button type="button" onClick={handleSaveAppLockPassword} className="rounded-lg bg-[#0078d4] px-3 py-2 text-[10px] font-extrabold text-white shadow-sm hover:bg-[#106ebe]">
-                            Passwort speichern
-                          </button>
-                        </div>
-                      </div>
-                      {appLockStatus && <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-800">{appLockStatus}</div>}
                     </div>
 
                     <div className="space-y-3 rounded-xl border border-slate-300 bg-white p-4 shadow-sm">
@@ -5050,7 +5045,65 @@ exit`;
                         </div>
                       </div>
                     </div>
-                  </div>                ) : optionsActiveTab === 'language' ? (
+                  </div>
+                ) : optionsActiveTab === 'appearance' ? (
+                  <div className="space-y-5 animate-fade-in">
+                    <div className="space-y-4 rounded-xl border border-cyan-200 bg-cyan-50/40 p-4 shadow-sm">
+                      <div className="border-b-2 border-cyan-100 pb-3">
+                        <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest">Darstellung der Nachrichtenliste</h3>
+                        <p className="mt-1 text-[10.5px] font-semibold leading-5 text-slate-500">Passen Sie die Aktionsleiste an, die beim Überfahren einer Nachricht eingeblendet wird.</p>
+                      </div>
+                      <div className="grid grid-cols-[180px_1fr] items-center gap-5 rounded-xl border border-slate-200 bg-white p-4">
+                        <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                          Eigene Farbe
+                          <div className="mt-2 flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={mailActionBarColor}
+                              onChange={(event) => setMailActionBarColor(event.target.value)}
+                              className="h-10 w-14 cursor-pointer rounded-lg border border-slate-250 bg-white p-1"
+                              aria-label="Farbe der Hover-Aktionsleiste"
+                            />
+                            <input
+                              value={mailActionBarColor.toUpperCase()}
+                              readOnly
+                              className="w-24 rounded-lg border border-slate-250 px-2 py-2 text-xs font-mono font-bold uppercase text-slate-700 outline-none focus:border-[#0078d4]"
+                              aria-label="Hex-Farbwert der Hover-Aktionsleiste"
+                            />
+                          </div>
+                        </label>
+                        <div>
+                          <span className="mb-2 block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Vorschau</span>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="relative h-20 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-[11px] text-slate-700 shadow-sm">
+                              <div className="font-extrabold">Beispielnachricht</div>
+                              <div className="mt-1 text-slate-500">Die Aktionsleiste erscheint beim Darüberfahren.</div>
+                              <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between rounded-md border px-2 py-1 shadow-sm" style={{ backgroundColor: mailActionBarColor, borderColor: '#0f172a22' }}>
+                                <span className="flex items-center gap-3"><Pin className="h-3.5 w-3.5" /><MailOpen className="h-3.5 w-3.5 text-blue-500" /></span>
+                                <span className="flex items-center gap-3"><Star className="h-3.5 w-3.5 text-amber-500" /><Trash2 className="h-3.5 w-3.5 text-red-500" /></span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="mr-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Schnellauswahl:</span>
+                        {['#ffffff', '#e0f2fe', '#dcfce7', '#fef3c7', '#fce7f3', '#1e293b'].map(color => (
+                          <button
+                            key={color}
+                            type="button"
+                            onClick={() => setMailActionBarColor(color)}
+                            className={`h-7 w-7 rounded-md border shadow-sm transition-transform hover:scale-110 ${mailActionBarColor.toLowerCase() === color ? 'ring-2 ring-[#0078d4] ring-offset-2' : 'border-slate-300'}`}
+                            style={{ backgroundColor: color }}
+                            title={color.toUpperCase()}
+                            aria-label={`Aktionsleistenfarbe ${color}`}
+                          />
+                        ))}
+                        <button type="button" onClick={() => setMailActionBarColor('#ffffff')} className="ml-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-extrabold text-slate-600 hover:bg-slate-50">Standard wiederherstellen</button>
+                      </div>
+                    </div>
+                  </div>
+                ) : optionsActiveTab === 'language' ? (
                   <div className="space-y-5 animate-fade-in">
                     <div className="space-y-3">
                       <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest pb-1 border-b border-slate-100">
@@ -5312,6 +5365,73 @@ exit`;
                     </div>
                   </div>
                 ) : optionsActiveTab === 'security' ? (
+                  <div className="space-y-5 animate-fade-in">
+                    <div className="space-y-4 rounded-xl border border-red-200 bg-red-50/30 p-4 shadow-sm">
+                      <div className="flex items-center justify-between gap-5 border-b-2 border-red-100 pb-4">
+                        <div>
+                          <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-800">App-Passwort und Zugangsschutz</h3>
+                          <p className="mt-1 text-[10.5px] font-semibold leading-5 text-slate-500">Ist der Schutz aktiv, muss Unique Mail nach jedem vollständigen App-Start zuerst entsperrt werden.</p>
+                        </div>
+                        <label className="flex shrink-0 cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-700">Passwortschutz</span>
+                          <span className="relative inline-flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={appLockEnabledDraft}
+                              onChange={(event) => {
+                                setAppLockEnabledDraft(event.target.checked);
+                                setAppLockStatus('Änderung noch nicht gespeichert.');
+                              }}
+                              className="peer sr-only"
+                            />
+                            <span className="h-6 w-11 rounded-full bg-slate-300 transition-colors peer-checked:bg-emerald-600 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white" />
+                          </span>
+                        </label>
+                      </div>
+
+                      <div className={`rounded-xl border p-4 ${appLockEnabledDraft ? 'border-blue-200 bg-white' : 'border-slate-200 bg-slate-100/70'}`}>
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-800">{appLockConfig?.enabled ? 'Passwort ändern oder Schutz deaktivieren' : 'Neues App-Passwort festlegen'}</p>
+                            <p className="mt-1 text-[10px] leading-4 text-slate-500">Mindestens 4 Zeichen; erlaubt sind Buchstaben und Zahlen. Das Passwort wird ausschließlich als Salt und Hash gespeichert.</p>
+                          </div>
+                          <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase ${appLockConfig?.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                            Gespeichert: {appLockConfig?.enabled ? 'Aktiv' : 'Inaktiv'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                          {appLockConfig?.enabled && (
+                            <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                              Aktuelles Passwort
+                              <input type="password" value={appLockCurrentPassword} onChange={(event) => setAppLockCurrentPassword(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0078d4] focus:ring-2 focus:ring-blue-100" autoComplete="current-password" />
+                            </label>
+                          )}
+                          {appLockEnabledDraft && (
+                            <>
+                              <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                                {appLockConfig?.enabled ? 'Neues Passwort (optional)' : 'Neues Passwort'}
+                                <input type="password" value={appLockNewPassword} onChange={(event) => setAppLockNewPassword(event.target.value)} placeholder="mind. 4 Zeichen" className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0078d4] focus:ring-2 focus:ring-blue-100" autoComplete="new-password" />
+                              </label>
+                              <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                                Wiederholen
+                                <input type="password" value={appLockConfirmPassword} onChange={(event) => setAppLockConfirmPassword(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0078d4] focus:ring-2 focus:ring-blue-100" autoComplete="new-password" />
+                              </label>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                          <p className="text-[10px] font-semibold text-slate-500">Zum Ändern oder Deaktivieren eines aktiven Schutzes ist das aktuelle Passwort erforderlich.</p>
+                          <button type="button" onClick={() => void handleApplyAppLockSettings()} className="rounded-lg bg-[#0078d4] px-4 py-2 text-[10px] font-extrabold text-white shadow-sm hover:bg-[#106ebe]">
+                            Sicherheitseinstellung speichern
+                          </button>
+                        </div>
+                      </div>
+                      {appLockStatus && <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-800">{appLockStatus}</div>}
+                    </div>
+                  </div>
+                ) : optionsActiveTab === 'images' ? (
                   <div className="space-y-5 animate-fade-in">
                     {/* Section 3: Sender security and image privacy */}
                     <div className="space-y-3">
@@ -6021,7 +6141,7 @@ exit`;
                     <span></span><span>{pwdError}</span>
                   </p>
                 )}
-                <p className="mt-2 text-[10.5px] font-semibold text-slate-500">Verwenden Sie das unter Einstellungen &gt; Allgemein festgelegte App-Passwort.</p>
+                <p className="mt-2 text-[10.5px] font-semibold text-slate-500">Verwenden Sie das unter Einstellungen &gt; Sicherheit festgelegte App-Passwort.</p>
               </div>
 
               <div className="flex space-x-2 pt-2">

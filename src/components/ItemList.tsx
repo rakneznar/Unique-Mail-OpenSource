@@ -150,6 +150,7 @@ interface ItemListProps {
   contactSortLabels?: string[];
   onContactSortLabelsChange?: (labels: string[]) => void;
   onNewContact?: () => void;
+  mailActionBarColor?: string;
 }
 
 export default function ItemList({
@@ -200,7 +201,8 @@ export default function ItemList({
   onSetReminder,
   contactSortLabels = ['Newsletter', 'Privat', 'Beruflich'],
   onContactSortLabelsChange,
-  onNewContact
+  onNewContact,
+  mailActionBarColor = '#ffffff'
 }: ItemListProps) {
   const [contextMenu, setContextMenu] = React.useState<{ x: number; y: number; emailId: string } | null>(null);
   const [newContactGroupLabel, setNewContactGroupLabel] = React.useState('');
@@ -210,6 +212,15 @@ export default function ItemList({
   const [mailListMetrics, setMailListMetrics] = React.useState({ scrollTop: 0, viewportHeight: 600 });
   const mailScrollRef = React.useRef<HTMLDivElement>(null);
   const listKeyboardRef = React.useRef<HTMLDivElement>(null);
+  const actionBarTextColor = React.useMemo(() => {
+    const match = mailActionBarColor.match(/^#([0-9a-f]{6})$/i);
+    if (!match) return '#1f2937';
+    const value = Number.parseInt(match[1], 16);
+    const red = (value >> 16) & 255;
+    const green = (value >> 8) & 255;
+    const blue = value & 255;
+    return (red * 299 + green * 587 + blue * 114) / 1000 < 145 ? '#ffffff' : '#1f2937';
+  }, [mailActionBarColor]);
 
   React.useEffect(() => {
     setMailListMetrics(prev => ({ ...prev, scrollTop: 0 }));
@@ -773,7 +784,14 @@ export default function ItemList({
                 </p>
 
                 {/* Instant Action Row: left = pin/read, right = favorite/delete */}
-                <div className="absolute left-2 right-2 bottom-1.5 flex items-center justify-between rounded-md border border-slate-100/80 bg-white/95 px-1 py-0.5 shadow-sm opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto dark:bg-[#141a29]/95 dark:border-slate-800">
+                <div
+                  className="mail-hover-action-bar absolute left-2 right-2 bottom-1.5 flex items-center justify-between rounded-md border px-1 py-0.5 shadow-sm opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+                  style={{
+                    backgroundColor: mailActionBarColor,
+                    borderColor: actionBarTextColor === '#ffffff' ? '#ffffff55' : '#0f172a22',
+                    color: actionBarTextColor
+                  }}
+                >
                   <div className="flex items-center space-x-1.5">
                     <button
                       title={email.isPinned ? "Nachricht lösen" : "Nachricht anpinnen"}
