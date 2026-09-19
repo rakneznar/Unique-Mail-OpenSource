@@ -2224,7 +2224,7 @@ a{color:#0078d4;cursor:pointer}
           <Briefcase className="w-16 h-16 text-slate-300 stroke-1 mb-4" />
           <h3 className="text-sm font-bold text-slate-600">Kein Kontakt ausgewählt</h3>
           <p className="text-xs text-slate-400 max-w-xs mt-1.5 leading-5">
-            Wählen Sie ein Team-Mitglied aus, um die Rolle, E-Mail und WPF Kontaktkarte einzusehen.
+            Wählen Sie einen Kontakt aus, um dessen Rolle und Kontaktdaten einzusehen.
           </p>
         </div>
       );
@@ -2238,7 +2238,7 @@ a{color:#0078d4;cursor:pointer}
         {/* Contact Header Background with Card Visual representation */}
         <div className="p-6 border-b border-slate-200 bg-slate-50/30 relative">
           <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-5">
-            {/* Visual WPF Card Placeholder Avatar Circle */}
+            {/* Contact avatar */}
             <div className="w-16 h-16 rounded-full bg-[#0078d4]/10 border border-[#0078d4]/15 text-[#0078d4] font-extrabold text-xl flex items-center justify-center shadow-inner">
               {initials}
             </div>
@@ -2304,32 +2304,7 @@ a{color:#0078d4;cursor:pointer}
           </div>
         </div>
 
-        {/* WPF XAML User Contact Card Template Generator */}
-        <div className="p-6 bg-slate-50 flex-1">
-          <div className="flex items-center space-x-2 text-xs font-bold text-[#0078d4] mb-2 uppercase tracking-wide">
-            <Code className="w-4 h-4" />
-            <span>Zugeordnetes XAML Template: <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono font-bold text-[10px]">ContactCard.xaml</code></span>
-          </div>
-          <p className="text-[11px] text-slate-500 mb-4 leading-5 font-medium">
-            Dieses Template definiert die Benutzeroberfläche zur Visualisierung von Kontakten als Visitenkarten in WPF. Sie können es kopieren und in Ihr <code className="bg-slate-100 p-0.5 px-1 rounded text-slate-700 font-extrabold">UserControl</code> einbetten:
-          </p>
-
-          <div className="relative bg-slate-950 rounded-xl p-4 border border-slate-800 shadow-md">
-            <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono mb-2.5">
-              <span>ContactCardItemTemplate.xaml</span>
-              <button 
-                onClick={() => handleCopyCode(contactCardXaml, 'contact-card')}
-                className="hover:text-white flex items-center space-x-1.5 cursor-pointer font-bold transition-all p-1 hover:bg-slate-800 rounded-md"
-              >
-                {copiedText === 'contact-card' ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedText === 'contact-card' ? 'Kopiert' : 'Kopieren'}</span>
-              </button>
-            </div>
-            <pre className="text-[11px] font-mono text-[#dadada] overflow-x-auto select-text leading-5 max-h-48">
-              {contactCardXaml}
-            </pre>
-          </div>
-        </div>
+        <div className="flex-1 bg-slate-50" />
       </div>
     );
   }
@@ -2342,7 +2317,7 @@ a{color:#0078d4;cursor:pointer}
           <CheckSquare className="w-16 h-16 text-slate-300 stroke-1 mb-4" />
           <h3 className="text-sm font-bold text-slate-600">Keine Aufgabe ausgewählt</h3>
           <p className="text-xs text-slate-400 max-w-xs mt-1.5 leading-5">
-            Wählen Sie ein To-Do-Element aus der Liste aus, um die Details, Fristen und den Code einzublenden.
+            Wählen Sie eine Aufgabe aus, um Details und Fristen einzublenden.
           </p>
         </div>
       );
@@ -2355,7 +2330,7 @@ a{color:#0078d4;cursor:pointer}
         <div className="p-6 border-b border-slate-200 bg-slate-50/25">
           <div className="flex items-center space-x-2 text-slate-400 text-[10px] font-extrabold uppercase tracking-widest mb-2.5">
             <CheckSquare className="w-3.5 h-3.5 text-amber-500" />
-            <span>WPF To-Do Element</span>
+            <span>Aufgabe</span>
           </div>
           
           <h1 className="text-lg font-extrabold text-slate-900 leading-tight">
@@ -2419,32 +2394,7 @@ a{color:#0078d4;cursor:pointer}
           </div>
         )}
 
-        {/* C# Tasks SQLite model definition script */}
-        <div className="p-6 bg-slate-50 flex-1">
-          <div className="flex items-center space-x-2 text-xs font-bold text-[#0078d4] mb-2 uppercase tracking-wide">
-            <Code className="w-4 h-4" />
-            <span>Zugehöriges C# SQLite Repository Datenmodell</span>
-          </div>
-          <p className="text-[11px] text-slate-500 mb-3.5 leading-5 font-medium">
-            Dieses Item wird in C# zur persistenten Synchronisation über ein Entity Framework Core Modell namens <code className="bg-slate-200 px-1.5 py-0.5 rounded font-mono text-[10px] text-slate-700 font-bold">TaskItem</code> gemappt.
-          </p>
-
-          <div className="relative bg-slate-950 rounded-xl p-4 border border-slate-800 shadow-md">
-            <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono mb-2.5">
-              <span>TaskItem.cs</span>
-              <button 
-                onClick={() => handleCopyCode(taskModelCode, 'task-cs')}
-                className="hover:text-white flex items-center space-x-1.5 cursor-pointer font-bold transition-all p-1 hover:bg-slate-800 rounded-md"
-              >
-                {copiedText === 'task-cs' ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedText === 'task-cs' ? 'Kopiert' : 'Kopieren'}</span>
-              </button>
-            </div>
-            <pre className="text-[11px] font-mono text-[#dadada] overflow-x-auto select-text leading-5 max-h-48">
-              {taskModelCode}
-            </pre>
-          </div>
-        </div>
+        <div className="flex-1 bg-slate-50" />
 
       </div>
     );

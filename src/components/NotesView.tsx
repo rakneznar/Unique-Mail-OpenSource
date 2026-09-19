@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   StickyNote, Plus, Trash2, ChevronDown, ChevronRight, Edit3, 
-  X, Save, Palette, Check, Search, Grid, List as ListIcon 
+  X, Save, Palette, Check, Search, Grid, List as ListIcon, ImagePlus, ClipboardPaste
 } from 'lucide-react';
 import { Note } from '../types';
 
@@ -57,6 +57,10 @@ export default function NotesView({
   const [editorTitle, setEditorTitle] = useState<string>('');
   const [editorContent, setEditorContent] = useState<string>('');
   const [editorColor, setEditorColor] = useState<string>('#fef08a');
+  const [editorImages, setEditorImages] = useState<NonNullable<Note['images']>>([]);
+  const [imageError, setImageError] = useState<string>('');
+  const [noteContextMenu, setNoteContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   
   // Grid vs. lists view toggle
   const [isListView, setIsListView] = useState<boolean>(false);
@@ -73,6 +77,7 @@ export default function NotesView({
       title: 'Neue Notiz',
       content: '',
       date: new Date().toLocaleDateString('de-DE'),
+      updatedAt: new Date().toISOString(),
       color: '#fef08a' // default classic yellow
     };
     
@@ -87,7 +92,99 @@ export default function NotesView({
     setEditorTitle(note.title);
     setEditorContent(note.content);
     setEditorColor(note.color);
+    setEditorImages(note.images || []);
+    setImageError('');
   };
+
+  const formatEditedAt = (note: Note) => {
+    if (note.updatedAt) {
+      const parsed = new Date(note.updatedAt);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+      }
+    }
+    return note.date;
+  };
+
+  const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      reject(new Error('Nur Bilddateien können in Notizen eingefügt werden.'));
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      reject(new Error('Ein Bild darf höchstens 4 MB groß sein.'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const maxSide = 1400;
+        const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext('2d');
+        if (!context) {
+          reject(new Error('Das Bild konnte nicht verarbeitet werden.'));
+          return;
+        }
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      image.onerror = () => reject(new Error('Das Bildformat konnte nicht verarbeitet werden.'));
+      image.src = String(reader.result || '');
+    };
+    reader.onerror = () => reject(new Error('Das Bild konnte nicht gelesen werden.'));
+    reader.readAsDataURL(file);
+  });
+
+  const addImageFiles = async (files: File[]) => {
+    setImageError('');
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      setImageError('Die Zwischenablage enthält kein Bild.');
+      return;
+    }
+    try {
+      const available = Math.max(0, 12 - editorImages.length);
+      const additions = await Promise.all(imageFiles.slice(0, available).map(async (file, index) => ({
+        id: `note-image-${Date.now()}-${index}`,
+        name: file.name || `Bild ${editorImages.length + index + 1}`,
+        dataUrl: await fileToDataUrl(file)
+      })));
+      setEditorImages(prev => [...prev, ...additions]);
+      if (imageFiles.length > available) setImageError('Pro Notiz können höchstens 12 Bilder gespeichert werden.');
+    } catch (error) {
+      setImageError(error instanceof Error ? error.message : 'Das Bild konnte nicht eingefügt werden.');
+    }
+  };
+
+  const pasteImageFromClipboard = async () => {
+    setNoteContextMenu(null);
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      const files: File[] = [];
+      for (const item of clipboardItems) {
+        const imageType = item.types.find(type => type.startsWith('image/'));
+        if (!imageType) continue;
+        const blob = await item.getType(imageType);
+        files.push(new File([blob], `Zwischenablage-${Date.now()}.${imageType.split('/')[1] || 'png'}`, { type: imageType }));
+      }
+      await addImageFiles(files);
+    } catch {
+      setImageError('Der Zugriff auf die Zwischenablage wurde verweigert oder sie enthält kein Bild.');
+    }
+  };
+
+  useEffect(() => {
+    if (!noteContextMenu) return;
+    const closeMenu = () => setNoteContextMenu(null);
+    window.addEventListener('pointerdown', closeMenu);
+    return () => window.removeEventListener('pointerdown', closeMenu);
+  }, [noteContextMenu]);
 
   const handleSaveNote = () => {
     if (!editingNote) return;
@@ -99,7 +196,9 @@ export default function NotesView({
           title: editorTitle.trim() || 'Unbenannt',
           content: editorContent,
           color: editorColor,
-          date: new Date().toLocaleDateString('de-DE')
+          date: new Date().toLocaleDateString('de-DE'),
+          updatedAt: new Date().toISOString(),
+          images: editorImages
         };
       }
       return n;
@@ -307,8 +406,8 @@ export default function NotesView({
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-4 text-[10px] font-mono whitespace-nowrap shrink-0 ml-4">
-                    <span className="text-slate-500 font-bold">{n.date}</span>
+                  <div className="flex items-center space-x-4 text-[11px] font-mono whitespace-nowrap shrink-0 ml-4">
+                    <span className="text-slate-300 font-bold">Bearbeitet: {formatEditedAt(n)}</span>
                     <button
                       onClick={(e) => handleDeleteNote(n.id, e)}
                       className="p-1.5 hover:bg-red-950 hover:text-red-400 rounded-lg text-slate-400 transition-all active:scale-95"
@@ -354,11 +453,17 @@ export default function NotesView({
                     <div className="flex-1 mt-1 text-xs overflow-hidden leading-4 font-bold break-words">
                       <p className="font-extrabold underline text-[11px] tracking-tight pb-1 truncate text-black">{note.title}</p>
                       <p className="text-[10px] text-[#4d4b49] line-clamp-4 select-none font-medium mt-0.5 leading-4">{note.content || 'Doppelklick zum Bearbeiten...'}</p>
+                      {!!note.images?.length && (
+                        <div className="mt-1.5 flex items-center gap-1 text-[9px] font-bold text-slate-700">
+                          <ImagePlus className="h-3 w-3" />
+                          <span>{note.images.length} {note.images.length === 1 ? 'Bild' : 'Bilder'}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Note Date Footer info */}
-                    <div className="border-t border-black/5 pt-1.5 mt-2 flex items-center justify-between text-[8.5px] font-bold text-[#8a8886] font-mono shrink-0 select-none">
-                      <span>{note.date}</span>
+                    <div className="border-t border-black/10 pt-1.5 mt-2 flex items-center justify-between text-[10px] font-bold text-[#5f5d5b] font-mono shrink-0 select-none">
+                      <span title="Letzte Bearbeitung">{formatEditedAt(note)}</span>
                       <div 
                         className="w-2 h-2 rounded-full border border-black/10" 
                         style={{ backgroundColor: note.color }}
@@ -392,7 +497,7 @@ export default function NotesView({
               transition={{ type: 'spring', damping: 25, stiffness: 350 }}
               onClick={(e) => e.stopPropagation()}
               style={{ backgroundColor: editorColor }}
-              className="w-[350px] aspect-square rounded-2xl shadow-2xl flex flex-col overflow-hidden text-[#323130] font-sans border-t-[8px] border-t-black/15 border border-black/5 relative"
+              className="w-[520px] max-w-[calc(100vw-32px)] h-[570px] max-h-[calc(100vh-32px)] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-[#323130] font-sans border-t-[8px] border-t-black/15 border border-black/5 relative"
             >
               {/* Sticky Note Command Toolbar Header */}
               <div className="h-9 px-3 bg-black/5 flex items-center justify-between font-bold text-[10px] select-none text-[#5e5c5a]">
@@ -427,6 +532,26 @@ export default function NotesView({
                     </div>
                   </div>
 
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      void addImageFiles(Array.from(event.target.files || []));
+                      event.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    className="p-1 hover:bg-black/10 rounded-lg transition-all active:scale-95 text-slate-700"
+                    title="Bild hinzufügen"
+                  >
+                    <ImagePlus className="w-3.5 h-3.5" />
+                  </button>
+
                   {/* Delete this note inside editor */}
                   <button 
                     onClick={() => handleDeleteNote(editingNote.id)}
@@ -449,7 +574,13 @@ export default function NotesView({
               </div>
 
               {/* Note Content Input Block */}
-              <div className="flex-1 p-4 flex flex-col space-y-3 bg-transparent">
+              <div
+                className="flex-1 min-h-0 p-4 flex flex-col space-y-3 bg-transparent"
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setNoteContextMenu({ x: event.clientX, y: event.clientY });
+                }}
+              >
                 {/* Editable Title Header input */}
                 <input
                   type="text"
@@ -463,14 +594,45 @@ export default function NotesView({
                 <textarea
                   value={editorContent}
                   onChange={(e) => setEditorContent(e.target.value)}
+                  onPaste={(event) => {
+                    const imageFiles: File[] = [];
+                    for (let index = 0; index < event.clipboardData.items.length; index += 1) {
+                      const item = event.clipboardData.items[index];
+                      if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+                      const file = item.getAsFile();
+                      if (file) imageFiles.push(file);
+                    }
+                    if (imageFiles.length === 0) return;
+                    event.preventDefault();
+                    void addImageFiles(imageFiles);
+                  }}
                   placeholder="Schreiben Sie hier Ihre Gedanken auf..."
-                  className="w-full flex-1 bg-transparent resize-none outline-none text-[11.5px] leading-5 text-slate-800 placeholder-slate-600 font-medium select-text"
+                  className="w-full min-h-24 flex-1 bg-transparent resize-none outline-none text-[12px] leading-5 text-slate-800 placeholder-slate-600 font-medium select-text"
                 />
+
+                {!!editorImages.length && (
+                  <div className="grid max-h-40 grid-cols-3 gap-2 overflow-y-auto rounded-lg border border-black/10 bg-white/35 p-2">
+                    {editorImages.map(image => (
+                      <div key={image.id} className="group/image relative aspect-video overflow-hidden rounded-md border border-black/10 bg-white shadow-sm">
+                        <img src={image.dataUrl} alt={image.name} className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setEditorImages(prev => prev.filter(item => item.id !== image.id))}
+                          className="absolute right-1 top-1 rounded-md bg-slate-950/75 p-1 text-white opacity-0 transition-opacity group-hover/image:opacity-100"
+                          title="Bild entfernen"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {imageError && <p className="rounded-md border border-red-200 bg-red-50/90 px-2 py-1.5 text-[10px] font-bold text-red-700">{imageError}</p>}
               </div>
 
               {/* Statusbar showing date and OK confirmation button */}
-              <div className="h-10 border-t border-black/5 px-2 bg-black/2.5 flex items-center justify-between text-[8px] text-[#797775] font-extrabold select-none font-mono">
-                <span>BEARBEITET: {editingNote.date}</span>
+              <div className="h-11 border-t border-black/10 px-3 bg-black/2.5 flex items-center justify-between text-[10.5px] text-[#5f5d5b] font-extrabold select-none font-mono">
+                <span>Bearbeitet: {formatEditedAt(editingNote)}</span>
                 <button
                   onClick={handleSaveNote}
                   className="px-3 py-1.5 bg-black/10 hover:bg-black/20 text-[#323130] rounded-lg font-bold flex items-center space-x-1 border border-black/5 active:scale-95 transition-all text-[9.5px] cursor-pointer"
@@ -480,6 +642,23 @@ export default function NotesView({
                 </button>
               </div>
             </motion.div>
+            {noteContextMenu && (
+              <div
+                className="fixed z-[160] min-w-56 rounded-lg border border-slate-200 bg-white p-1.5 text-slate-800 shadow-2xl"
+                style={{ left: Math.min(noteContextMenu.x, window.innerWidth - 240), top: Math.min(noteContextMenu.y, window.innerHeight - 70) }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => void pasteImageFromClipboard()}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[11px] font-bold hover:bg-slate-100"
+                >
+                  <ClipboardPaste className="h-4 w-4 text-[#0078d4]" />
+                  Bild aus Zwischenablage einfügen
+                </button>
+              </div>
+            )}
           </div>
         )}
       </AnimatePresence>

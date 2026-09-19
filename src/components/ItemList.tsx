@@ -1159,9 +1159,7 @@ export default function ItemList({
                       )}
                     </div>
                     
-                    <span className="text-[9px] font-mono font-bold text-slate-400">
-                      WPF CONTROLS
-                    </span>
+                    <span className="text-[9px] font-mono font-bold text-slate-400">AUFGABE</span>
                   </div>
                 </div>
               </div>

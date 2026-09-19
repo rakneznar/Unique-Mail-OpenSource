@@ -110,8 +110,14 @@ export interface Note {
   title: string;
   content: string;
   date: string;
+  updatedAt?: string;
   color: string; // e.g., '#fef08a' (yellow) or '#bbf7d0' (green) etc. Classic yellow is default.
   accountEmail?: string;
+  images?: Array<{
+    id: string;
+    name: string;
+    dataUrl: string;
+  }>;
 }
 
 export interface CodeFile {

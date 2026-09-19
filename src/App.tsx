@@ -18,13 +18,23 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, 
 import AppLogo from './components/AppLogo';
 import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
-import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap } from 'lucide-react';
+import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.62';
+const APP_VERSION = '0.5.63';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
 type AppLockConfig = { enabled: boolean; salt: string; hash: string; updatedAt?: string };
+type CalendarSyncProvider = 'none' | 'caldav' | 'google' | 'microsoft';
+type CalendarSyncSettings = {
+  provider: CalendarSyncProvider;
+  enabled: boolean;
+  serverUrl: string;
+  username: string;
+  calendarPath: string;
+  intervalMinutes: number;
+  conflictPolicy: 'newest' | 'local' | 'server';
+};
 type AppPage = 'mail' | 'calendar' | 'contacts' | 'crm' | 'tasks' | 'notes' | 'dev';
 type BackgroundJob = {
   id: number;
@@ -105,6 +115,15 @@ const mailPinIdentityKeys = (mail: Email) => {
     uid > 0 ? `imap:${account}|${folder}|${uidValidity}|${uid}` : '',
     fingerprint !== '|||' ? `mail:${fingerprint}` : ''
   ].filter(Boolean)));
+};
+const DEFAULT_CALENDAR_SYNC_SETTINGS: CalendarSyncSettings = {
+  provider: 'none',
+  enabled: false,
+  serverUrl: '',
+  username: '',
+  calendarPath: '',
+  intervalMinutes: 15,
+  conflictPolicy: 'newest'
 };
 
 const compactMutationMail = (mail: Email): Email => ({
@@ -928,22 +947,16 @@ exit`;
     URL.revokeObjectURL(url);
   };
 
-  // Security gate for WPF Suite
-  const [isWpfUnlocked, setIsWpfUnlocked] = useState<boolean>(false);
-  const [showPwdModal, setShowPwdModal] = useState<boolean>(false);
-  const [pwdValue, setPwdValue] = useState<string>('');
-  const [pwdError, setPwdError] = useState<string>('');
-
   // Categories list
   const [categoriesList, setCategoriesList] = useState<Category[]>(() => {
     return readJsonStorage<Category[]>('outlook_categories', [
       { name: 'Architektur', color: '#1d4ed8' },
       { name: 'Synchronisation', color: '#047857' },
       { name: 'Design-System', color: '#6d28d9' },
-      { name: 'WPF Frontend', color: '#c2410c' },
+      { name: 'Benutzeroberfläche', color: '#c2410c' },
       { name: 'Performance', color: '#b91c1c' },
       { name: 'Allgemein', color: '#4b5563' }
-    ]);
+    ]).map(category => category.name === 'WPF Frontend' ? { ...category, name: 'Benutzeroberfläche' } : category);
   });
 
   const [showCategoriesModal, setShowCategoriesModal] = useState<boolean>(false);
@@ -971,7 +984,7 @@ exit`;
   // Spacing & options states
   const [isDense, setIsDense] = useState<boolean>(false);
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState<boolean>(false);
-  const [optionsActiveTab, setOptionsActiveTab] = useState<'general' | 'appearance' | 'language' | 'accounts' | 'security' | 'images' | 'ai' | 'help' | 'vacation' | 'signature'>('general');
+  const [optionsActiveTab, setOptionsActiveTab] = useState<'general' | 'appearance' | 'language' | 'accounts' | 'calendar' | 'security' | 'images' | 'ai' | 'help' | 'vacation' | 'signature'>('general');
   const [autoMarkAsReadOnOpen, setAutoMarkAsReadOnOpen] = useState<boolean>(() => localStorage.getItem('uniquemail_auto_mark_read_on_open') !== 'false');
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(() => localStorage.getItem('uniquemail_ui_language') === 'en' ? 'en' : 'de');
   const [mailDateFormat, setMailDateFormat] = useState<string>(() => localStorage.getItem('uniquemail_mail_date_format') || DEFAULT_MAIL_DATE_FORMAT);
@@ -1010,6 +1023,13 @@ exit`;
     const stored = localStorage.getItem('uniquemail_mail_action_bar_color') || '#ffffff';
     return /^#[0-9a-f]{6}$/i.test(stored) ? stored : '#ffffff';
   });
+  const [calendarSyncSettings, setCalendarSyncSettings] = useState<CalendarSyncSettings>(() => ({
+    ...DEFAULT_CALENDAR_SYNC_SETTINGS,
+    ...readJsonStorage<Partial<CalendarSyncSettings>>('uniquemail_calendar_sync_settings', {})
+  }));
+  const [calendarSyncPassword, setCalendarSyncPassword] = useState<string>('');
+  const [calendarSyncStatus, setCalendarSyncStatus] = useState<string>('');
+  const [isTestingCalendarSync, setIsTestingCalendarSync] = useState<boolean>(false);
 
   const isSenderBlockedAddress = (sender?: string) => blockedSenderList.some(entry => normalizeSenderAddress(entry) === normalizeSenderAddress(sender));
   const guardBlockedSenderMail = (mail: Email): Email => isSenderBlockedAddress(mail.senderEmail)
@@ -1266,6 +1286,7 @@ exit`;
           vacationEnd,
           vacationMessage
         },
+        calendar: calendarSyncSettings,
         workspace: {
           notes,
           tasks,
@@ -1383,6 +1404,18 @@ exit`;
         if (typeof settings.vacation.vacationMessage === 'string') setVacationMessage(settings.vacation.vacationMessage);
       }
 
+      if (settings?.calendar && typeof settings.calendar === 'object' && !Array.isArray(settings.calendar)) {
+        const importedProvider = ['none', 'caldav', 'google', 'microsoft'].includes(settings.calendar.provider)
+          ? settings.calendar.provider as CalendarSyncProvider
+          : 'none';
+        setCalendarSyncSettings({
+          ...DEFAULT_CALENDAR_SYNC_SETTINGS,
+          ...settings.calendar,
+          provider: importedProvider,
+          enabled: Boolean(settings.calendar.enabled && importedProvider !== 'none')
+        });
+      }
+
       if (settings?.workspace) {
         if (Array.isArray(settings.workspace.notes)) setNotes(settings.workspace.notes);
         if (Array.isArray(settings.workspace.tasks)) setTasks(settings.workspace.tasks);
@@ -1496,6 +1529,10 @@ exit`;
     (window as any).uniqueMailNative?.persistRendererStorage?.();
   }, [mailActionBarColor]);
   useEffect(() => {
+    localStorage.setItem('uniquemail_calendar_sync_settings', JSON.stringify(calendarSyncSettings));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+  }, [calendarSyncSettings]);
+  useEffect(() => {
     localStorage.setItem('uniquemail_signature_active', signatureActive.toString());
   }, [signatureActive]);
 
@@ -1528,6 +1565,53 @@ exit`;
     }
     const result = await nativeApi.chooseDownloadDirectory();
     if (result?.directory) setAttachmentDownloadDirectory(result.directory);
+  };
+
+  const calendarCredentialKey = `caldav-${calendarSyncSettings.username || 'default'}`;
+
+  const handleSaveCalendarSettings = async () => {
+    setCalendarSyncStatus('');
+    if (calendarSyncSettings.provider === 'caldav') {
+      if (!calendarSyncSettings.serverUrl.trim() || !calendarSyncSettings.username.trim()) {
+        setCalendarSyncStatus('Bitte Server-Adresse und Benutzername vollständig eintragen.');
+        return;
+      }
+
+      if (calendarSyncPassword) {
+        const result = await (window as any).uniqueMailNative?.setCalendarPassword?.({
+          key: calendarCredentialKey,
+          password: calendarSyncPassword
+        });
+        if (result?.ok === false) {
+          setCalendarSyncStatus(result.error || 'Das Kalender-Passwort konnte nicht sicher gespeichert werden.');
+          return;
+        }
+        setCalendarSyncPassword('');
+      }
+    }
+    setCalendarSyncSettings(prev => ({ ...prev, enabled: prev.provider !== 'none' && prev.enabled }));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+    setCalendarSyncStatus('Kalender-Einstellungen wurden gespeichert.');
+  };
+
+  const handleTestCalDavConnection = async () => {
+    setCalendarSyncStatus('');
+    setIsTestingCalendarSync(true);
+    try {
+      const result = await (window as any).uniqueMailNative?.testCalDavConnection?.({
+        key: calendarCredentialKey,
+        url: calendarSyncSettings.serverUrl,
+        username: calendarSyncSettings.username,
+        password: calendarSyncPassword
+      });
+      setCalendarSyncStatus(result?.ok
+        ? `Verbindung erfolgreich${result.server ? ` (${result.server})` : ''}. Der Server unterstützt CalDAV-Zugriffe.`
+        : result?.error || 'Die CalDAV-Verbindung konnte nicht hergestellt werden.');
+    } catch (error) {
+      setCalendarSyncStatus(error instanceof Error ? error.message : 'Die CalDAV-Verbindung konnte nicht hergestellt werden.');
+    } finally {
+      setIsTestingCalendarSync(false);
+    }
   };
   const handleOptimizeVacation = async () => {
     setIsOptimizingVacation(true);
@@ -1876,7 +1960,7 @@ exit`;
     });
 
     setSelectedContactId(newContact.id);
-    alert(`Der Kontakt "${newContact.firstName} ${newContact.lastName}" (${newContact.email}) wurde erfolgreich permanent in Ihrer WPF SQLite Datenbank hinterlegt!`);
+    alert(`Der Kontakt "${newContact.firstName} ${newContact.lastName}" (${newContact.email}) wurde erfolgreich lokal gespeichert.`);
   };
 
    const [showQuickStepsModal, setShowQuickStepsModal] = useState<boolean>(false);
@@ -4347,31 +4431,9 @@ exit`;
     </div>
   );
   const handlePageChange = (page: AppPage) => {
-    if (page === 'dev' && !isWpfUnlocked) {
-      setPwdValue('');
-      setPwdError('');
-      setShowPwdModal(true);
-    } else {
-      setCurrentPage(page);
-      setActiveTab(page === 'dev' ? 'dev' : 'start');
-    }
-  };
-
-  const handleVerifyPassword = async () => {
-    const trimmed = pwdValue.trim();
-    if (!appLockConfig?.enabled) {
-      setPwdError('Bitte aktivieren Sie zuerst unter Einstellungen > Sicherheit den Passwortschutz.');
-      return;
-    }
-    const enteredHash = await hashAppLockPassword(trimmed, appLockConfig.salt);
-    if (enteredHash === appLockConfig.hash) {
-      setIsWpfUnlocked(true);
-      setShowPwdModal(false);
-      setCurrentPage('dev');
-      setActiveTab('dev');
-    } else {
-      setPwdError('Das eingegebene App-Passwort ist falsch. Zugriff verweigert.');
-    }
+    if (page === 'dev' || page === 'contacts') page = 'crm';
+    setCurrentPage(page);
+    setActiveTab('start');
   };
 
   return (
@@ -4487,7 +4549,7 @@ exit`;
         {accounts.length === 0 ? (
           <div className="flex-1 bg-slate-50/50 dark:bg-[#0b0f19] flex items-center justify-center p-6 overflow-y-auto">
             <div className="bg-white dark:bg-[#0f172a] border border-slate-205 dark:border-[#1e293b] rounded-3xl shadow-2xl w-full max-w-xl p-8 flex flex-col relative overflow-hidden transition-all">
-              {/* Upper styling decor for WPF feel */}
+              {/* Upper styling decor */}
               <div className="absolute top-0 left-0 right-0 h-2.5 bg-gradient-to-r from-[#0078d4] via-purple-600 to-emerald-500"></div>
               
               <div className="text-center mb-6">
@@ -4658,19 +4720,6 @@ exit`;
               </div>
             </div>
           </div>
-        ) : currentPage === 'dev' ? (
-          
-          /* --- DESIGN WORKSPACE FOR DEVELOPERS (ARCH & ROADMAP) --- */
-          <ArchTab 
-            activeDevSection={activeDevSection}
-            setActiveDevSection={setActiveDevSection}
-            roadmapPhases={roadmapPhases}
-            codeFiles={wpfCodeFiles}
-            userEmail={activeAccountEmail}
-            onAccountConfigured={handleAccountConfigured}
-            discoveredSettings={discoveredSettings}
-          />
-
         ) : currentPage === 'notes' ? (
 
           /* --- TRADITIONAL CLASSIC OUTLOOK STICKY NOTES CANVAS --- */
@@ -4821,7 +4870,7 @@ exit`;
           <span className="text-slate-300">|</span>
           <div className="flex items-center text-slate-500">
             <span className="w-2 h-2 rounded-full bg-blue-500 mr-1.5 inline-block"></span>
-            <span>Konzept: WPF Classic Desktop-Replika (C# .NET 8)</span>
+            <span>Lokaler Desktop-Mailclient</span>
           </div>
         </div>
 
@@ -4846,7 +4895,7 @@ exit`;
 
       </div>
 
-      {/* 4. WPF Options Modal Dialog ("Optionen") */}
+      {/* 4. Options Modal Dialog */}
       {isOptionsModalOpen && (
         <div id="outlook-options-modal" className="fixed inset-0 bg-slate-900/45 backdrop-blur-xs flex items-center justify-center z-55 p-4 animate-fade-in">
           <div className="bg-slate-50 w-[920px] max-w-[calc(100vw-32px)] h-[680px] max-h-[calc(100vh-32px)] rounded-xl shadow-2xl border border-slate-205 flex flex-col overflow-hidden text-[#323130] font-sans">
@@ -4909,6 +4958,16 @@ exit`;
                   >
                     E-Mail-Konten
                   </button>
+                  <button
+                    onClick={() => setOptionsActiveTab('calendar')}
+                    className={`w-full text-left px-3.5 py-2 rounded-xl transition-all font-bold text-[11px] cursor-pointer ${
+                      optionsActiveTab === 'calendar'
+                        ? 'bg-white text-green-950 shadow-xs border-l-3 border-l-green-600'
+                        : 'text-slate-600 hover:bg-slate-200/60'
+                    }`}
+                  >
+                    Kalender
+                  </button>
                   <button 
                     onClick={() => setOptionsActiveTab('security')}
                     className={`w-full text-left px-3.5 py-2 rounded-xl transition-all font-bold text-[11px] cursor-pointer ${
@@ -4968,12 +5027,6 @@ exit`;
                     }`}
                   >
                     Hilfe und Sonstiges
-                  </button>
-                  <button className="text-left px-3.5 py-2 rounded-xl text-slate-400 text-[11px] opacity-70 cursor-not-allowed font-medium">
-                    SQLite Datenbank
-                  </button>
-                  <button className="text-left px-3.5 py-2 rounded-xl text-slate-400 text-[11px] opacity-70 cursor-not-allowed font-medium">
-                    WPF Frontend (STA)
                   </button>
                 </div>
                 <div className="p-2 border-t border-slate-200 text-[9px] text-slate-500 font-mono font-bold leading-relaxed">
@@ -5165,7 +5218,7 @@ exit`;
                     <div className="space-y-2">
                       <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest pb-1 border-b border-slate-100 flex items-center justify-between">
                         <span>Aktive E-Mail-Konten ({accounts.length})</span>
-                        <span className="text-[9.5px] text-slate-400 font-mono font-bold">WPF SQLite Register</span>
+                        <span className="text-[9.5px] text-slate-400 font-mono font-bold">Lokale Kontoverwaltung</span>
                       </h3>
 
                       <div className="space-y-1.5 max-h-36 overflow-y-auto border border-slate-200/80 bg-slate-50/50 p-2 rounded-xl shadow-inner-sm">
@@ -5361,6 +5414,120 @@ exit`;
                             <span>Konto registrieren</span>
                           </button>
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : optionsActiveTab === 'calendar' ? (
+                  <div className="space-y-5 animate-fade-in">
+                    <div className="flex items-start justify-between gap-5 border-b-2 border-green-100 pb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <CalendarDays className="h-5 w-5 text-green-700" />
+                          <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-800">Externe Kalender</h3>
+                        </div>
+                        <p className="mt-2 max-w-xl text-[10.5px] font-semibold leading-5 text-slate-500">Kalenderkonten werden für eine beidseitige Synchronisierung vorbereitet. Änderungen sollen dadurch sowohl lokal als auch beim gewählten Dienst ankommen.</p>
+                      </div>
+                      <label className="flex shrink-0 cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-700">Synchronisierung</span>
+                        <span className="relative inline-flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={calendarSyncSettings.enabled}
+                            disabled={calendarSyncSettings.provider === 'none'}
+                            onChange={(event) => setCalendarSyncSettings(prev => ({ ...prev, enabled: event.target.checked }))}
+                            className="peer sr-only"
+                          />
+                          <span className="h-6 w-11 rounded-full bg-slate-300 transition-colors peer-checked:bg-green-600 peer-disabled:opacity-50 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white" />
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="space-y-3">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Anbieter</p>
+                      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+                        {([
+                          ['none', 'Nur lokal', CalendarDays],
+                          ['caldav', 'CalDAV', Server],
+                          ['google', 'Google', Cloud],
+                          ['microsoft', 'Microsoft 365', Cloud]
+                        ] as const).map(([provider, label, Icon]) => (
+                          <button
+                            key={provider}
+                            type="button"
+                            onClick={() => {
+                              setCalendarSyncSettings(prev => ({ ...prev, provider, enabled: provider === 'none' ? false : prev.enabled }));
+                              setCalendarSyncStatus('');
+                            }}
+                            className={`flex items-center gap-2 rounded-lg border px-3 py-3 text-left text-[11px] font-extrabold transition-colors ${calendarSyncSettings.provider === provider ? 'border-green-500 bg-green-50 text-green-900' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                          >
+                            <Icon className="h-4 w-4" />
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {calendarSyncSettings.provider === 'caldav' && (
+                      <div className="space-y-4 border-t border-slate-200 pt-4">
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <label className="md:col-span-2 block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                            CalDAV-Server-Adresse
+                            <input value={calendarSyncSettings.serverUrl} onChange={(event) => setCalendarSyncSettings(prev => ({ ...prev, serverUrl: event.target.value }))} placeholder="https://cloud.example.de/remote.php/dav/" className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-100" spellCheck={false} />
+                          </label>
+                          <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                            Benutzername
+                            <input value={calendarSyncSettings.username} onChange={(event) => setCalendarSyncSettings(prev => ({ ...prev, username: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-100" spellCheck={false} />
+                          </label>
+                          <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                            Passwort oder App-Passwort
+                            <input type="password" value={calendarSyncPassword} onChange={(event) => setCalendarSyncPassword(event.target.value)} placeholder="Leer lassen, um das gespeicherte Passwort zu verwenden" className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-100" autoComplete="new-password" />
+                          </label>
+                          <label className="md:col-span-2 block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                            Kalenderpfad (optional)
+                            <input value={calendarSyncSettings.calendarPath} onChange={(event) => setCalendarSyncSettings(prev => ({ ...prev, calendarPath: event.target.value }))} placeholder="Wird bei leerem Feld automatisch ermittelt" className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-100" spellCheck={false} />
+                          </label>
+                        </div>
+                        <p className="text-[10px] font-semibold leading-4 text-slate-500">Das Kalenderpasswort wird mit dem sicheren Windows-Passwortspeicher verschlüsselt und nicht in den normalen Einstellungen abgelegt.</p>
+                      </div>
+                    )}
+
+                    {(calendarSyncSettings.provider === 'google' || calendarSyncSettings.provider === 'microsoft') && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-[10.5px] font-semibold leading-5 text-blue-900">
+                        Für {calendarSyncSettings.provider === 'google' ? 'Google Calendar' : 'Microsoft 365 / Outlook.com'} wird OAuth 2.0 verwendet. Die Oberfläche ist vorbereitet; zur Freischaltung in einer öffentlichen Version müssen noch die offiziellen Client-IDs und die Freigabe des Anbieters hinterlegt werden.
+                      </div>
+                    )}
+
+                    {calendarSyncSettings.provider !== 'none' && (
+                      <div className="grid grid-cols-1 gap-3 border-t border-slate-200 pt-4 md:grid-cols-2">
+                        <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                          Prüfintervall
+                          <select value={calendarSyncSettings.intervalMinutes} onChange={(event) => setCalendarSyncSettings(prev => ({ ...prev, intervalMinutes: Number(event.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-green-600">
+                            <option value={5}>Alle 5 Minuten</option>
+                            <option value={15}>Alle 15 Minuten</option>
+                            <option value={30}>Alle 30 Minuten</option>
+                            <option value={60}>Stündlich</option>
+                          </select>
+                        </label>
+                        <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                          Konfliktbehandlung
+                          <select value={calendarSyncSettings.conflictPolicy} onChange={(event) => setCalendarSyncSettings(prev => ({ ...prev, conflictPolicy: event.target.value as CalendarSyncSettings['conflictPolicy'] }))} className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-green-600">
+                            <option value="newest">Neueste Änderung gewinnt</option>
+                            <option value="server">Serverversion bevorzugen</option>
+                            <option value="local">Lokale Version bevorzugen</option>
+                          </select>
+                        </label>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+                      <div className="min-h-5 text-[10.5px] font-bold text-slate-600">{calendarSyncStatus}</div>
+                      <div className="flex gap-2">
+                        {calendarSyncSettings.provider === 'caldav' && (
+                          <button type="button" onClick={() => void handleTestCalDavConnection()} disabled={isTestingCalendarSync} className="rounded-lg border border-green-600 bg-white px-4 py-2 text-[10px] font-extrabold text-green-800 hover:bg-green-50 disabled:opacity-50">
+                            {isTestingCalendarSync ? 'Verbindung wird geprüft...' : 'Verbindung testen'}
+                          </button>
+                        )}
+                        <button type="button" onClick={() => void handleSaveCalendarSettings()} className="rounded-lg bg-green-700 px-4 py-2 text-[10px] font-extrabold text-white shadow-sm hover:bg-green-800">Einstellungen speichern</button>
                       </div>
                     </div>
                   </div>
@@ -5622,7 +5789,7 @@ exit`;
                           {
                             key: 'autoSmartReply',
                             title: 'Automatische Smart-Reply Antwortentwürfe',
-                            desc: 'Generiert im Lese-Bereich einer E-Mail reaktiv KI-Entwürfe zur schnellen Beantwortung im WPF-Editor.'
+                            desc: 'Generiert im Lese-Bereich einer E-Mail reaktiv KI-Entwürfe zur schnellen Beantwortung im Editor.'
                           },
                           {
                             key: 'autoPhishingScan',
@@ -5764,7 +5931,7 @@ exit`;
                         {/* AI Button and error message */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800 pt-3">
                           <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold font-mono">
-                            INFO: Wird in der WPF SQLite Datenbank synchronisiert.
+                            Info: Wird lokal gespeichert und mit dem E-Mail-Konto synchronisiert.
                           </span>
                           <button
                             type="button"
@@ -5801,7 +5968,7 @@ exit`;
                     {/* Section 2: Email Signature */}
                     <div className="space-y-4 pt-1">
                       <h3 className="text-xs font-extrabold text-[#323130] dark:text-slate-200 uppercase tracking-widest pb-1 border-b border-slate-205 dark:border-slate-800 flex items-center justify-between">
-                        <span>E-Mail-Signatur (WPF &amp; SMTP)</span>
+                        <span>E-Mail-Signatur</span>
                         <span className="text-[9.5px] text-purple-600 font-mono font-bold">Zugeordnete User-Signatur</span>
                       </h3>
 
@@ -6101,66 +6268,6 @@ exit`;
               </div>
             </div>
           </form>
-        </div>
-      )}
-
-      {/* WPF Suite / Developer Mode Password Gate Modal */}
-      {showPwdModal && (
-        <div id="wpf-password-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-120 animate-fade-in">
-          <div className="bg-white rounded-2xl w-[380px] border border-slate-200 shadow-2xl p-6 select-none font-sans text-xs">
-            <div className="flex flex-col items-center text-center space-y-3 mb-6">
-              <div className="p-3 bg-blue-50 text-blue-650 rounded-2xl shadow-inner border border-blue-100 flex items-center justify-center">
-                <AppLogo size={38} />
-              </div>
-              <div>
-                <h3 className="text-[14px] font-extrabold text-slate-800 tracking-tight">WPF Suite freischalten</h3>
-                <p className="text-[11px] text-slate-500 font-semibold mt-1">Das Entwickler-Menü ist systemgeschützt.</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block mb-1.5">Mitarbeiterschlüssel (Passwort)</label>
-                <input 
-                  id="wpf-pwd-input"
-                  type="password"
-                  value={pwdValue}
-                  onChange={(e) => {
-                    setPwdValue(e.target.value);
-                    setPwdError('');
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleVerifyPassword();
-                  }}
-                  autoFocus
-                  placeholder="Geben Sie den Admin-Schlüssel ein..."
-                  className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-250 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/15 focus:border-[#0078d4] font-medium"
-                />
-                {pwdError && (
-                  <p id="wpf-pwd-error" className="text-red-700 font-bold text-[10px] mt-1.5 flex items-center space-x-1">
-                    <span></span><span>{pwdError}</span>
-                  </p>
-                )}
-                <p className="mt-2 text-[10.5px] font-semibold text-slate-500">Verwenden Sie das unter Einstellungen &gt; Sicherheit festgelegte App-Passwort.</p>
-              </div>
-
-              <div className="flex space-x-2 pt-2">
-                <button
-                  onClick={() => setShowPwdModal(false)}
-                  className="w-1/2 py-2.2 text-xs border border-slate-250 rounded-xl hover:bg-slate-100 font-bold text-slate-600 cursor-pointer transition-all active:scale-95 text-center"
-                >
-                  Abbrechen
-                </button>
-                <button
-                  id="submit-wpf-password"
-                  onClick={() => void handleVerifyPassword()}
-                  className="w-1/2 py-2.2 text-xs bg-[#0078d4] text-white rounded-xl hover:bg-[#106ebe] font-bold shadow-md transition-all cursor-pointer active:scale-95 text-center"
-                >
-                  Verifizieren
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 

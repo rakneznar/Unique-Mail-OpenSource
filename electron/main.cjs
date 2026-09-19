@@ -1368,6 +1368,100 @@ ipcMain.handle('native:delete-account-password', async (_event, email) => {
   }
 });
 
+function calendarCredentialStorePath() {
+  const settingsDir = uniqueMailDataPaths?.settingsDir || app.getPath('userData');
+  fs.mkdirSync(settingsDir, { recursive: true });
+  return path.join(settingsDir, 'calendar-passwords.json');
+}
+
+function readCalendarCredentialStore() {
+  try {
+    const target = calendarCredentialStorePath();
+    if (!fs.existsSync(target)) return {};
+    const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    log(`calendar credential read failed: ${error.message || String(error)}`);
+    return {};
+  }
+}
+
+function writeCalendarCredentialStore(store) {
+  writeJsonAtomically(calendarCredentialStorePath(), store || {});
+}
+
+function normalizeCalendarCredentialKey(value) {
+  return String(value || 'caldav-default').trim().toLowerCase().replace(/[^a-z0-9@._-]/g, '-').slice(0, 160) || 'caldav-default';
+}
+
+function readCalendarPassword(key) {
+  const encrypted = readCalendarCredentialStore()[normalizeCalendarCredentialKey(key)];
+  if (!encrypted || !safeStorage.isEncryptionAvailable()) return '';
+  return safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
+}
+
+ipcMain.handle('native:set-calendar-password', async (_event, payload) => {
+  try {
+    const key = normalizeCalendarCredentialKey(payload?.key);
+    const password = String(payload?.password || '');
+    if (!password) return { ok: false, error: 'Ein Passwort ist erforderlich.' };
+    if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: 'Der sichere Windows-Passwortspeicher ist nicht verfügbar.' };
+    const store = readCalendarCredentialStore();
+    store[key] = safeStorage.encryptString(password).toString('base64');
+    writeCalendarCredentialStore(store);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message || String(error) };
+  }
+});
+
+ipcMain.handle('native:delete-calendar-password', async (_event, rawKey) => {
+  try {
+    const store = readCalendarCredentialStore();
+    delete store[normalizeCalendarCredentialKey(rawKey)];
+    writeCalendarCredentialStore(store);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message || String(error) };
+  }
+});
+
+ipcMain.handle('native:test-caldav-connection', async (_event, payload) => {
+  try {
+    const url = new URL(String(payload?.url || '').trim());
+    const isLocal = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !(isLocal && url.protocol === 'http:')) {
+      return { ok: false, error: 'Aus Sicherheitsgründen sind nur HTTPS-Adressen erlaubt.' };
+    }
+    const username = String(payload?.username || '').trim();
+    const password = String(payload?.password || '') || readCalendarPassword(payload?.key);
+    if (!username || !password) return { ok: false, error: 'Benutzername und Passwort sind erforderlich.' };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(url, {
+        method: 'PROPFIND',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${username}:${password}`, 'utf8').toString('base64')}`,
+          Depth: '0',
+          'Content-Type': 'application/xml; charset=utf-8'
+        },
+        body: '<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/><d:resourcetype/></d:prop></d:propfind>',
+        signal: controller.signal
+      });
+      if (response.status === 200 || response.status === 207) {
+        return { ok: true, status: response.status, server: response.headers.get('server') || '' };
+      }
+      return { ok: false, error: `Der Kalender-Server antwortete mit HTTP ${response.status}.` };
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    const message = error?.name === 'AbortError' ? 'Zeitüberschreitung beim Kalender-Server.' : error.message || String(error);
+    return { ok: false, error: message };
+  }
+});
+
 function encryptPortableCredentialBackup(store, backupPassword) {
   if (!safeStorage.isEncryptionAvailable()) {
     throw new Error('Der Windows-Passwortspeicher ist auf diesem Profil nicht verfuegbar.');

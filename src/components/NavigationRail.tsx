@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Mail, Calendar, Users, SquareCheck, Terminal, HelpCircle, StickyNote, Briefcase } from 'lucide-react';
+import { Mail, Calendar, Users, SquareCheck, StickyNote } from 'lucide-react';
 
 interface NavigationRailProps {
   currentPage: 'mail' | 'calendar' | 'contacts' | 'crm' | 'tasks' | 'notes' | 'dev';
@@ -17,11 +17,9 @@ export default function NavigationRail({ currentPage, setCurrentPage, language =
   const items = [
     { id: 'mail', label: isEnglish ? 'Mail' : 'E-Mail', icon: Mail, color: 'text-blue-600 hover:text-blue-800' },
     { id: 'calendar', label: isEnglish ? 'Calendar' : 'Kalender', icon: Calendar, color: 'text-green-600 hover:text-green-800' },
-    { id: 'contacts', label: isEnglish ? 'Contacts' : 'Kontakte', icon: Users, color: 'text-teal-600 hover:text-teal-800' },
-    { id: 'crm', label: 'CRM', icon: Briefcase, color: 'text-indigo-600 hover:text-indigo-800' },
+    { id: 'crm', label: 'CRM', icon: Users, color: 'text-teal-600 hover:text-teal-800' },
     { id: 'tasks', label: isEnglish ? 'Tasks' : 'Aufgaben', icon: SquareCheck, color: 'text-amber-600 hover:text-amber-800' },
     { id: 'notes', label: isEnglish ? 'Notes' : 'Notizen', icon: StickyNote, color: 'text-yellow-600 hover:text-yellow-750' },
-    { id: 'dev', label: 'WPF Suite', icon: Terminal, color: 'text-slate-700 hover:text-black font-extrabold' },
   ] as const;
 
   return (
@@ -56,28 +54,14 @@ export default function NavigationRail({ currentPage, setCurrentPage, language =
               
               {/* Tooltip on Hover */}
               <div className="hidden group-hover:block absolute left-15 bg-slate-900 border border-slate-800 text-white text-[10.5px] py-1 px-2.5 rounded-lg shadow-xl whitespace-nowrap z-50 animate-fade-in font-medium">
-                {item.label} {isEnglish ? 'open' : 'öffnen'} (WPF View)
+                {item.label} {isEnglish ? 'open' : 'öffnen'}
               </div>
             </button>
           );
         })}
       </div>
 
-      {/* Corporate Info Footer Icon */}
-      <div className="flex flex-col items-center space-y-4">
-        <div className="group relative font-sans">
-          <button 
-            onClick={() => setCurrentPage('dev')} 
-            className="text-slate-400 hover:text-slate-600 p-2 rounded-xl hover:bg-slate-200/80 transition-all duration-150 active:scale-90"
-          >
-            <HelpCircle className="w-5 h-5" />
-          </button>
-          
-          <div className="hidden group-hover:block absolute bottom-full left-15 bg-slate-900 border border-slate-800 text-white text-[10.5px] py-1 px-2.5 rounded-lg shadow-xl whitespace-nowrap z-50 font-medium">
-            {isEnglish ? 'C# & WPF documentation' : 'C# & WPF Dokumentation'}
-          </div>
-        </div>
-      </div>
+      <div />
     </div>
   );
 }

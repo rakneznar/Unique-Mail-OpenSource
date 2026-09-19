@@ -8,7 +8,8 @@ function readLocalStorageSnapshot() {
       const key = localStorage.key(index);
       if (!key || key === 'outlook_emails') continue;
       const value = localStorage.getItem(key);
-      if (typeof value === 'string' && value.length <= 2_000_000) values[key] = value;
+      const maximumLength = key === 'outlook_notes' ? 15_000_000 : 2_000_000;
+      if (typeof value === 'string' && value.length <= maximumLength) values[key] = value;
     }
   } catch {
     // Renderer storage is best-effort until the page origin is ready.
@@ -84,6 +85,9 @@ contextBridge.exposeInMainWorld('uniqueMailNative', {
   deleteAccountPassword: (email) => ipcRenderer.invoke('native:delete-account-password', email),
   exportAccountPasswords: (payload) => ipcRenderer.invoke('native:export-account-passwords', payload),
   importAccountPasswords: (payload) => ipcRenderer.invoke('native:import-account-passwords', payload),
+  setCalendarPassword: (payload) => ipcRenderer.invoke('native:set-calendar-password', payload),
+  deleteCalendarPassword: (key) => ipcRenderer.invoke('native:delete-calendar-password', key),
+  testCalDavConnection: (payload) => ipcRenderer.invoke('native:test-caldav-connection', payload),
   detachCompose: (payload) => ipcRenderer.invoke('native:detach-compose', payload),
   getDetachedComposeState: () => ipcRenderer.invoke('native:get-detached-compose-state'),
   updateDetachedComposeState: (payload) => ipcRenderer.invoke('native:update-detached-compose-state', payload),

@@ -736,7 +736,7 @@ export default function Ribbon({
                   id="btn-test-verbindung"
                   onClick={() => {
                     const domain = userEmail.split('@')[1] || 'unique-mail.de';
-                    alert(`[WPF Core Sync]\nIMAP: imap.${domain} Port 993 (SSL)\nSMTP: smtp.${domain} Port 465 (TLS/SSL)\nStatus: Bereit. Synchronisations-Queue läuft.`);
+                    alert(`Verbindungstest\nIMAP: imap.${domain} Port 993 (SSL)\nSMTP: smtp.${domain} Port 465 (TLS/SSL)\nStatus: Bereit. Synchronisations-Queue läuft.`);
                   }}
                   className="flex flex-col items-center justify-center p-1 rounded-xl hover:bg-slate-100 transition-all w-24 h-14 border border-slate-205 bg-slate-50 text-slate-800 cursor-pointer active:scale-95 shadow-xs"
                   title="Verbindung prüfen"
