@@ -287,6 +287,7 @@ export default function Ribbon({
           </button>
 
           <button
+            data-search-options-surface="true"
             onClick={() => { setCurrentPage('mail'); setActiveTab('search'); }}
             className={`px-4 text-[11px] uppercase tracking-wide font-extrabold cursor-pointer transition-all flex items-center h-full rounded-t-lg ${
               activeTab === 'search'
@@ -854,12 +855,12 @@ export default function Ribbon({
 
         {/* --- SEARCH OPTIONS TAB CONTROLS --- */}
         {currentPage !== 'dev' && activeTab === 'search' && (
-          <div className="flex h-full items-stretch py-1.5 shrink-0">
+          <div data-search-options-surface="true" className="flex h-full items-stretch py-1.5 shrink-0">
             <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
               <div className="flex items-center gap-1.5">
                 {([
                   ['folder', 'Aktueller Ordner'],
-                  ['mailbox', 'Aktuelles Postfach'],
+                  ['mailbox', 'Alle Ordner dieses Kontos'],
                   ['all-mailboxes', 'Alle Postfächer']
                 ] as Array<[MailSearchScope, string]>).map(([scope, label]) => (
                   <button

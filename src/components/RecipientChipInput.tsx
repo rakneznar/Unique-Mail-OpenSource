@@ -24,6 +24,11 @@ export default function RecipientChipInput({ value, onChange, suggestions = [], 
   const [highlighted, setHighlighted] = React.useState(0);
   const emittedValueRef = React.useRef(value);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const blurTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => () => {
+    if (blurTimerRef.current !== null) window.clearTimeout(blurTimerRef.current);
+  }, []);
 
   React.useEffect(() => {
     if (value === emittedValueRef.current) return;
@@ -80,7 +85,12 @@ export default function RecipientChipInput({ value, onChange, suggestions = [], 
     <div className="relative min-w-0 flex-1">
       <div
         className="flex min-h-[32px] w-full cursor-text flex-wrap items-center gap-1 border border-slate-200 bg-white px-1.5 py-1 text-[11.5px] transition-all focus-within:border-[#0078d4] focus-within:ring-2 focus-within:ring-[#0078d4]/10 dark:border-[#334155] dark:bg-[#1e293b]"
-        onClick={() => inputRef.current?.focus()}
+        onPointerDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          event.preventDefault();
+          inputRef.current?.focus({ preventScroll: true });
+        }}
+        onClick={() => inputRef.current?.focus({ preventScroll: true })}
       >
         {tokens.map(token => (
           <span key={token.email} title={token.raw} className="inline-flex h-6 max-w-[240px] items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 font-semibold text-blue-900 dark:border-blue-700 dark:bg-blue-950/60 dark:text-blue-100">
@@ -93,8 +103,18 @@ export default function RecipientChipInput({ value, onChange, suggestions = [], 
         <input
           ref={inputRef}
           value={draft}
-          onFocus={() => setFocused(true)}
-          onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+          onFocus={() => {
+            if (blurTimerRef.current !== null) window.clearTimeout(blurTimerRef.current);
+            blurTimerRef.current = null;
+            setFocused(true);
+          }}
+          onBlur={() => {
+            if (blurTimerRef.current !== null) window.clearTimeout(blurTimerRef.current);
+            blurTimerRef.current = window.setTimeout(() => {
+              setFocused(false);
+              blurTimerRef.current = null;
+            }, 120);
+          }}
           onChange={(event) => {
             const next = event.target.value;
             if (/[;,]/.test(next)) {

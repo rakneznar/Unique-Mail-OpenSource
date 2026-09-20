@@ -1,7 +1,7 @@
 {
   "name": "unique-mail",
   "private": true,
-  "version": "0.5.63",
+  "version": "0.5.64",
   "description": "Local-first desktop mail client with IMAP/SMTP synchronization for Windows.",
   "author": "PACOPAR",
   "license": "Apache-2.0",
@@ -106,4 +106,3 @@
   },
   "productName": "Unique Mail"
 }
-

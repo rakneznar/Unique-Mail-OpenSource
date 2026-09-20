@@ -341,7 +341,7 @@ export default function ItemList({
       className="w-80 bg-slate-50 border-r border-slate-200 flex flex-col h-full font-sans select-none shrink-0 min-w-[320px]"
     >
       {/* 1. Universal Search Box */}
-      <div className="h-12 px-3 flex items-center border-b border-slate-200 bg-white">
+      <div data-search-options-surface="true" className="h-12 px-3 flex items-center border-b border-slate-200 bg-white">
         <div className="relative w-full">
           <input
             id="outlook-universal-search"
@@ -450,7 +450,7 @@ export default function ItemList({
               <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">Suchbereich</div>
               {([
                 ['folder', 'Aktueller Ordner'],
-                ['mailbox', 'Aktuelles Postfach'],
+                ['mailbox', 'Alle Ordner dieses Kontos'],
                 ['all-mailboxes', 'Alle Postfächer']
               ] as Array<[MailSearchScope, string]>).map(([scope, label]) => (
                 <button key={scope} type="button" onClick={() => { setMailSearchScope(scope); setShowFilterMenu(false); }} className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">

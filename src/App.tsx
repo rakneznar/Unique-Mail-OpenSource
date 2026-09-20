@@ -20,7 +20,9 @@ import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.63';
+const APP_VERSION = '0.5.64';
+const DEVELOPER_PASSWORD_SALT = 'unique-mail-wpf-suite-admin-v1';
+const DEVELOPER_PASSWORD_HASH = 'b85432d324dda9a402159fe262e0c3280cea9a522894a5710aaf60071253d111';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
@@ -287,6 +289,10 @@ export default function App() {
       const target = findEditable(event.target);
       if (!canFocus(target)) return;
       lastEditableElement = target;
+      // Native inputs place the caret during their normal pointer sequence. Forcing
+      // focus in the capture phase can race that sequence and leave chip inputs
+      // focused without a usable caret.
+      if (event.target === target) return;
       focusEditable(target);
       window.requestAnimationFrame(() => focusEditable(target));
     };
@@ -303,16 +309,25 @@ export default function App() {
     };
 
     document.addEventListener('pointerdown', handleEditablePointer, true);
-    document.addEventListener('mousedown', handleEditablePointer, true);
     document.addEventListener('focusin', rememberEditableFocus, true);
     window.addEventListener('focus', restoreRendererFocus);
     return () => {
       document.removeEventListener('pointerdown', handleEditablePointer, true);
-      document.removeEventListener('mousedown', handleEditablePointer, true);
       document.removeEventListener('focusin', rememberEditableFocus, true);
       window.removeEventListener('focus', restoreRendererFocus);
     };
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'search') return;
+    const closeSearchOptions = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-search-options-surface="true"]')) return;
+      setActiveTab('start');
+    };
+    document.addEventListener('pointerdown', closeSearchOptions, true);
+    return () => document.removeEventListener('pointerdown', closeSearchOptions, true);
+  }, [activeTab]);
 
   const processBackgroundJobs = () => {
     if (backgroundWorkerRunningRef.current) return;
@@ -1016,6 +1031,10 @@ exit`;
   const [appLockNewPassword, setAppLockNewPassword] = useState<string>('');
   const [appLockConfirmPassword, setAppLockConfirmPassword] = useState<string>('');
   const [appLockStatus, setAppLockStatus] = useState<string>('');
+  const [isDeveloperAccessDialogOpen, setIsDeveloperAccessDialogOpen] = useState<boolean>(false);
+  const [isDeveloperSessionUnlocked, setIsDeveloperSessionUnlocked] = useState<boolean>(false);
+  const [developerPassword, setDeveloperPassword] = useState<string>('');
+  const [developerPasswordError, setDeveloperPasswordError] = useState<string>('');
   const securitySettingsImportInputRef = React.useRef<HTMLInputElement>(null);
   const [settingsBackupPassword, setSettingsBackupPassword] = useState<string>('');
   const [settingsBackupPasswordConfirm, setSettingsBackupPasswordConfirm] = useState<string>('');
@@ -1071,6 +1090,33 @@ exit`;
     } else {
       setAppUnlockError('Falsches App-Passwort.');
     }
+  };
+
+  const requestDeveloperAccess = () => {
+    if (isDeveloperSessionUnlocked) {
+      setIsOptionsModalOpen(false);
+      setCurrentPage('dev');
+      setActiveTab('dev');
+      return;
+    }
+    setDeveloperPassword('');
+    setDeveloperPasswordError('');
+    setIsDeveloperAccessDialogOpen(true);
+  };
+
+  const handleUnlockDeveloperArea = async () => {
+    const hash = await hashAppLockPassword(developerPassword.trim(), DEVELOPER_PASSWORD_SALT);
+    if (hash !== DEVELOPER_PASSWORD_HASH) {
+      setDeveloperPasswordError('Der Admin-Schlüssel ist nicht korrekt.');
+      return;
+    }
+    setIsDeveloperSessionUnlocked(true);
+    setIsDeveloperAccessDialogOpen(false);
+    setIsOptionsModalOpen(false);
+    setDeveloperPassword('');
+    setDeveloperPasswordError('');
+    setCurrentPage('dev');
+    setActiveTab('dev');
   };
 
   const handleSaveAppLockPassword = async () => {
@@ -4431,7 +4477,11 @@ exit`;
     </div>
   );
   const handlePageChange = (page: AppPage) => {
-    if (page === 'dev' || page === 'contacts') page = 'crm';
+    if (page === 'contacts') page = 'crm';
+    if (page === 'dev') {
+      requestDeveloperAccess();
+      return;
+    }
     setCurrentPage(page);
     setActiveTab('start');
   };
@@ -4469,6 +4519,51 @@ exit`;
             <button type="submit" className="mt-4 w-full rounded-xl bg-[#0078d4] px-4 py-2.5 text-xs font-black text-white shadow-md hover:bg-[#106ebe]">
               Entsperren
             </button>
+          </form>
+        </div>
+      )}
+
+      {isDeveloperAccessDialogOpen && (
+        <div id="unique-developer-lock-overlay" className="fixed inset-0 z-[320] flex items-center justify-center bg-slate-950/75 backdrop-blur-sm p-4">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleUnlockDeveloperArea();
+            }}
+            className="w-[420px] max-w-full rounded-2xl border border-amber-200 bg-white p-6 shadow-2xl"
+          >
+            <div className="mb-5 text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700 shadow-inner">
+                <ShieldAlert className="h-6 w-6" />
+              </div>
+              <h2 className="text-base font-black text-slate-900">WPF Suite freischalten</h2>
+              <p className="mt-1 text-[11px] font-semibold text-slate-500">Dieser Entwicklerbereich besitzt einen eigenen Admin-Schutz.</p>
+            </div>
+            <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+              Admin-Schlüssel
+              <input
+                autoFocus
+                type="password"
+                value={developerPassword}
+                onChange={(event) => {
+                  setDeveloperPassword(event.target.value);
+                  setDeveloperPasswordError('');
+                }}
+                className="mt-1 w-full rounded-xl border border-slate-250 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-amber-500 focus:ring-4 focus:ring-amber-100"
+                placeholder="Admin-Schlüssel"
+                autoComplete="off"
+              />
+            </label>
+            <p className="mt-2 text-[10px] font-semibold leading-4 text-slate-500">Der Admin-Schlüssel ist vollständig unabhängig vom optionalen App-Passwort des Benutzers.</p>
+            {developerPasswordError && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700">{developerPasswordError}</div>}
+            <div className="mt-4 flex gap-2">
+              <button type="button" onClick={() => setIsDeveloperAccessDialogOpen(false)} className="flex-1 rounded-xl border border-slate-250 bg-white px-4 py-2.5 text-xs font-black text-slate-600 hover:bg-slate-50">
+                Abbrechen
+              </button>
+              <button type="submit" className="flex-1 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-black text-white shadow-md hover:bg-amber-700">
+                Freischalten
+              </button>
+            </div>
           </form>
         </div>
       )}
@@ -4546,7 +4641,19 @@ exit`;
         />
 
         {/* Dynamic Inner Layout Page depending on selection */}
-        {accounts.length === 0 ? (
+        {currentPage === 'dev' && isDeveloperSessionUnlocked ? (
+
+          <ArchTab
+            activeDevSection={activeDevSection}
+            setActiveDevSection={setActiveDevSection}
+            roadmapPhases={roadmapPhases}
+            codeFiles={wpfCodeFiles}
+            userEmail={activeAccountEmail}
+            onAccountConfigured={handleAccountConfigured}
+            discoveredSettings={discoveredSettings}
+          />
+
+        ) : accounts.length === 0 ? (
           <div className="flex-1 bg-slate-50/50 dark:bg-[#0b0f19] flex items-center justify-center p-6 overflow-y-auto">
             <div className="bg-white dark:bg-[#0f172a] border border-slate-205 dark:border-[#1e293b] rounded-3xl shadow-2xl w-full max-w-xl p-8 flex flex-col relative overflow-hidden transition-all">
               {/* Upper styling decor */}
@@ -5596,6 +5703,18 @@ exit`;
                         </div>
                       </div>
                       {appLockStatus && <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-800">{appLockStatus}</div>}
+                    </div>
+
+                    <div className="space-y-4 rounded-xl border border-amber-200 bg-amber-50/30 p-4 shadow-sm">
+                      <div className="flex items-center justify-between gap-5">
+                        <div>
+                          <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-800">Administrativer Entwicklerzugang</h3>
+                          <p className="mt-1 text-[10.5px] font-semibold leading-5 text-slate-500">Die WPF Suite verwendet einen festgelegten Admin-Schlüssel. Sie ist nicht vom App-Passwort des Benutzers abhängig und wird nur für die aktuelle Sitzung freigeschaltet.</p>
+                        </div>
+                        <button type="button" onClick={requestDeveloperAccess} className="shrink-0 rounded-lg bg-amber-600 px-4 py-2 text-[10px] font-extrabold text-white shadow-sm hover:bg-amber-700">
+                          {isDeveloperSessionUnlocked ? 'WPF Suite öffnen' : 'Admin-Zugang prüfen'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : optionsActiveTab === 'images' ? (
