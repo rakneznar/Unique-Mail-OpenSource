@@ -20,12 +20,13 @@ import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.64';
+const APP_VERSION = '0.5.65';
 const DEVELOPER_PASSWORD_SALT = 'unique-mail-wpf-suite-admin-v1';
 const DEVELOPER_PASSWORD_HASH = 'b85432d324dda9a402159fe262e0c3280cea9a522894a5710aaf60071253d111';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
+type SignatureFormat = 'text' | 'html';
 type AppLockConfig = { enabled: boolean; salt: string; hash: string; updatedAt?: string };
 type CalendarSyncProvider = 'none' | 'caldav' | 'google' | 'microsoft';
 type CalendarSyncSettings = {
@@ -1298,7 +1299,7 @@ exit`;
     }
     const payload = {
       app: 'Unique Mail',
-      schema: 'unique-mail.settings.v7',
+      schema: 'unique-mail.settings.v8',
       version: APP_VERSION,
       exportedAt: new Date().toISOString(),
       settings: {
@@ -1324,7 +1325,9 @@ exit`;
         signatures: {
           signatureActive,
           signatureText,
-          accountSignatures
+          signatureFormat,
+          accountSignatures,
+          accountSignatureFormats
         },
         vacation: {
           vacationActive,
@@ -1438,8 +1441,16 @@ exit`;
       if (settings?.signatures) {
         if (typeof settings.signatures.signatureActive === 'boolean') setSignatureActive(settings.signatures.signatureActive);
         if (typeof settings.signatures.signatureText === 'string') setSignatureText(settings.signatures.signatureText);
+        if (settings.signatures.signatureFormat === 'text' || settings.signatures.signatureFormat === 'html') {
+          setSignatureFormat(settings.signatures.signatureFormat);
+        }
         if (settings.signatures.accountSignatures && typeof settings.signatures.accountSignatures === 'object' && !Array.isArray(settings.signatures.accountSignatures)) {
           setAccountSignatures(settings.signatures.accountSignatures);
+        }
+        if (settings.signatures.accountSignatureFormats && typeof settings.signatures.accountSignatureFormats === 'object' && !Array.isArray(settings.signatures.accountSignatureFormats)) {
+          const importedFormats = Object.fromEntries(Object.entries(settings.signatures.accountSignatureFormats)
+            .filter(([, format]) => format === 'text' || format === 'html')) as Record<string, SignatureFormat>;
+          setAccountSignatureFormats(importedFormats);
         }
       }
 
@@ -1539,8 +1550,16 @@ exit`;
     const defaultSig = "Mit freundlichen Grüßen,\nMax Mustermann\nProjektleiter .NET\nUnique Utilities S.A.\nTelefon: +49 (0) 123 456789";
     return localStorage.getItem('uniquemail_signature_text') || defaultSig;
   });
+  const [signatureFormat, setSignatureFormat] = useState<SignatureFormat>(() => {
+    const stored = localStorage.getItem('uniquemail_signature_format');
+    if (stored === 'text' || stored === 'html') return stored;
+    return looksLikeHtmlMailBody(localStorage.getItem('uniquemail_signature_text') || '') ? 'html' : 'text';
+  });
   const [accountSignatures, setAccountSignatures] = useState<Record<string, string>>(() => {
     return readJsonStorage<Record<string, string>>('uniquemail_account_signatures', {});
+  });
+  const [accountSignatureFormats, setAccountSignatureFormats] = useState<Record<string, SignatureFormat>>(() => {
+    return readJsonStorage<Record<string, SignatureFormat>>('uniquemail_account_signature_formats', {});
   });
   const [signatureAIPrompt, setSignatureAIPrompt] = useState<string>('');
 
@@ -1580,15 +1599,28 @@ exit`;
   }, [calendarSyncSettings]);
   useEffect(() => {
     localStorage.setItem('uniquemail_signature_active', signatureActive.toString());
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
   }, [signatureActive]);
 
   useEffect(() => {
     localStorage.setItem('uniquemail_signature_text', signatureText);
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
   }, [signatureText]);
 
   useEffect(() => {
+    localStorage.setItem('uniquemail_signature_format', signatureFormat);
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+  }, [signatureFormat]);
+
+  useEffect(() => {
     localStorage.setItem('uniquemail_account_signatures', JSON.stringify(accountSignatures));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
   }, [accountSignatures]);
+
+  useEffect(() => {
+    localStorage.setItem('uniquemail_account_signature_formats', JSON.stringify(accountSignatureFormats));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+  }, [accountSignatureFormats]);
 
   useEffect(() => {
     localStorage.setItem('uniquemail_auto_mark_read_on_open', String(autoMarkAsReadOnOpen));
@@ -1692,7 +1724,7 @@ exit`;
       const response = await fetch('/api/ai/generate-signature', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentSignature: signatureEditorText, prompt: signatureAIPrompt }),
+        body: JSON.stringify({ currentSignature: signatureEditorText, prompt: signatureAIPrompt, format: signatureEditorFormat }),
       });
       if (!response.ok) {
         const errData = await response.json();
@@ -2235,6 +2267,13 @@ exit`;
   const activeAccount = accounts.find(a => a.email.toLowerCase() === activeAccountEmail.toLowerCase()) || accounts[0];
   const activeSignatureText = activeAccountEmail ? (accountSignatures[activeAccountEmail] ?? signatureText) : signatureText;
   const signatureEditorText = signatureEditorAccountEmail ? (accountSignatures[signatureEditorAccountEmail] ?? '') : '';
+  const inferSignatureFormat = (value: string): SignatureFormat => looksLikeHtmlMailBody(value) ? 'html' : 'text';
+  const activeSignatureFormat: SignatureFormat = activeAccountEmail
+    ? (accountSignatureFormats[activeAccountEmail] ?? inferSignatureFormat(activeSignatureText))
+    : signatureFormat;
+  const signatureEditorFormat: SignatureFormat = signatureEditorAccountEmail
+    ? (accountSignatureFormats[signatureEditorAccountEmail] ?? inferSignatureFormat(signatureEditorText))
+    : signatureFormat;
   const [discoveredSettings, setDiscoveredSettings] = useState<any>({
     imapServer: activeAccount?.imapServer || 'imap.local',
     imapPort: activeAccount?.imapPort || 993,
@@ -4941,8 +4980,11 @@ exit`;
               onToggleFlagCompleted={handleToggleFlagCompleted}
               signatureActive={signatureActive}
               signatureText={activeSignatureText}
+              signatureFormat={activeSignatureFormat}
               defaultSignatureText={signatureText}
+              defaultSignatureFormat={signatureFormat}
               accountSignatures={accountSignatures}
+              accountSignatureFormats={accountSignatureFormats}
               imageDownloadAllowList={imageDownloadAllowList}
               imageDownloadDenyList={imageDownloadDenyList}
               blockedSenderList={blockedSenderList}
@@ -6135,12 +6177,29 @@ exit`;
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Left half: Manual Signature Editor */}
                         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl space-y-3 shadow-sm flex flex-col justify-between">
-                          <div>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <label htmlFor="signature-format-select" className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                Format
+                              </label>
+                              <select
+                                id="signature-format-select"
+                                value={signatureEditorFormat}
+                                onChange={(event) => {
+                                  if (!signatureEditorAccountEmail) return;
+                                  setAccountSignatureFormats(previous => ({ ...previous, [signatureEditorAccountEmail]: event.target.value as SignatureFormat }));
+                                }}
+                                className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-bold text-slate-700 outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                              >
+                                <option value="text">Nur Text</option>
+                                <option value="html">Rohes HTML</option>
+                              </select>
+                            </div>
                             <label className="block text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                              Signatur bearbeiten:
+                              {signatureEditorFormat === 'html' ? 'HTML-Quelltext bearbeiten:' : 'Signaturtext bearbeiten:'}
                             </label>
                             <textarea 
-                              rows={5}
+                              rows={7}
                               value={signatureEditorText}
                               onChange={(e) => {
                                 if (signatureEditorAccountEmail) {
@@ -6148,11 +6207,26 @@ exit`;
                                 }
                               }}
                               className="w-full text-xs p-2.5 border border-slate-200 dark:border-slate-700 rounded-lg font-mono text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-950 focus:ring-1 focus:ring-purple-500 outline-none resize-none leading-relaxed"
-                              placeholder="Mit freundlichen Grüßen,..."
+                              placeholder={signatureEditorFormat === 'html'
+                                ? '<div><strong>Max Mustermann</strong><br><a href="https://example.com">Website</a></div>'
+                                : 'Mit freundlichen Grüßen,\nMax Mustermann'}
                             />
+                            {signatureEditorFormat === 'html' && signatureEditorText.trim() && (
+                              <div className="space-y-1">
+                                <span className="block text-[9.5px] font-bold uppercase text-slate-400">Vorschau</span>
+                                <iframe
+                                  title="HTML-Signaturvorschau"
+                                  sandbox=""
+                                  srcDoc={`<!doctype html><html><body style="margin:10px;font-family:Arial,sans-serif;font-size:12px;color:#222">${signatureEditorText}</body></html>`}
+                                  className="h-28 w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700"
+                                />
+                              </div>
+                            )}
                           </div>
                           <p className="text-[9.5px] text-slate-400 dark:text-slate-500 font-semibold italic mt-2">
-                            Tipp: Sie können auch HTML-Tags wie &lt;b&gt; oder Web-Links eingeben.
+                            {signatureEditorFormat === 'html'
+                              ? 'HTML-Formatierungen, Inline-CSS, Links und Bilder werden in die Nachricht übernommen.'
+                              : 'Im Textmodus werden Zeilenumbrüche übernommen und HTML-Zeichen als normaler Text behandelt.'}
                           </p>
                         </div>
 

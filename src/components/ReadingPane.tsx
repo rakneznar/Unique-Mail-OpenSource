@@ -22,6 +22,8 @@ export interface ComposeAttachmentPayload {
   contentBase64: string;
 }
 
+export type SignatureFormat = 'text' | 'html';
+
 export interface ComposeMailPayload {
   to: string;
   cc: string;
@@ -66,8 +68,11 @@ interface ReadingPaneProps {
   onCreateCalendarItemForDate?: (date: Date, draft?: CalendarItemDraft) => void;
   signatureActive?: boolean;
   signatureText?: string;
+  signatureFormat?: SignatureFormat;
   defaultSignatureText?: string;
+  defaultSignatureFormat?: SignatureFormat;
   accountSignatures?: Record<string, string>;
+  accountSignatureFormats?: Record<string, SignatureFormat>;
   imageDownloadAllowList?: string[];
   imageDownloadDenyList?: string[];
   blockedSenderList?: string[];
@@ -110,8 +115,11 @@ export default function ReadingPane({
   onCreateCalendarItemForDate,
   signatureActive = false,
   signatureText = '',
+  signatureFormat = 'text',
   defaultSignatureText = '',
+  defaultSignatureFormat = 'text',
   accountSignatures = {},
+  accountSignatureFormats = {},
   imageDownloadAllowList = [],
   imageDownloadDenyList = [],
   blockedSenderList = [],
@@ -262,17 +270,42 @@ export default function ReadingPane({
   const activeComposeAccount = accountOptions.find(acc => String(acc.email).toLowerCase() === String(composeAccountEmail || defaultComposeAccountEmail).toLowerCase()) || accountOptions[0];
   const selectedComposeAccountEmail = composeAccountEmail || defaultComposeAccountEmail;
   const accountSignatureText = accountSignatures[selectedComposeAccountEmail] ?? signatureText;
-  const buildSignatureHtml = (value: string) => value
-    ? `<div data-unique-mail-signature="true" style="color:#222; font-family:sans-serif; font-size:12px;">${value.replace(/\n/g, '<br/>')}</div>`
+  const accountSignatureFormat = accountSignatureFormats[selectedComposeAccountEmail]
+    ?? (looksLikeHtmlMailBody(accountSignatureText) ? 'html' : signatureFormat);
+  const escapeSignatureText = (value: string) => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+  const sanitizeSignatureHtml = (value: string) => {
+    const documentValue = new DOMParser().parseFromString(value, 'text/html');
+    documentValue.querySelectorAll('script, style, iframe, object, embed, meta, base, link, form, input, button, textarea, select').forEach(node => node.remove());
+    documentValue.body.querySelectorAll('*').forEach(element => {
+      Array.from(element.attributes).forEach(attribute => {
+        const name = attribute.name.toLowerCase();
+        const attributeValue = attribute.value.trim();
+        if (name.startsWith('on') || (['href', 'src', 'xlink:href'].includes(name) && /^\s*javascript:/i.test(attributeValue))) {
+          element.removeAttribute(attribute.name);
+        }
+        if (name === 'style' && /(expression\s*\(|javascript\s*:)/i.test(attributeValue)) {
+          element.removeAttribute(attribute.name);
+        }
+      });
+    });
+    return documentValue.body.innerHTML;
+  };
+  const buildSignatureHtml = (value: string, format: SignatureFormat = 'text') => value
+    ? `<div data-unique-mail-signature="true" style="color:#222; font-family:sans-serif; font-size:12px;">${format === 'html' ? sanitizeSignatureHtml(value) : escapeSignatureText(value).replace(/\r?\n/g, '<br/>')}</div>`
     : '';
 
-  const replaceComposeSignature = (value: string) => {
+  const replaceComposeSignature = (value: string, format: SignatureFormat = 'text') => {
     const editor = editorRef.current;
     if (!editor) return;
     editor.querySelectorAll('[data-unique-mail-signature]').forEach(node => node.remove());
     if (value) {
       const holder = document.createElement('div');
-      holder.innerHTML = buildSignatureHtml(value);
+      holder.innerHTML = buildSignatureHtml(value, format);
       const signatureNode = holder.firstElementChild;
       if (signatureNode) {
         const quote = editor.querySelector('[data-unique-mail-quote]');
@@ -286,7 +319,10 @@ export default function ReadingPane({
 
   const applyComposeSignatureChoice = (choice: 'none' | 'account' | 'default') => {
     setComposeSignatureChoice(choice);
-    replaceComposeSignature(choice === 'account' ? accountSignatureText : choice === 'default' ? defaultSignatureText : '');
+    replaceComposeSignature(
+      choice === 'account' ? accountSignatureText : choice === 'default' ? defaultSignatureText : '',
+      choice === 'account' ? accountSignatureFormat : defaultSignatureFormat
+    );
   };
 
   const normalizeSenderAddress = (value?: string) => (value || '').trim().toLowerCase();
@@ -584,6 +620,8 @@ a{color:#0078d4;cursor:pointer}
   const [selectedAttachmentIndexes, setSelectedAttachmentIndexes] = React.useState<number[]>([]);
   const attachmentSelectionAnchorRef = React.useRef<number | null>(null);
   const attachmentHoverPreviewTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeEmailIdRef = React.useRef(activeEmail?.id);
+  activeEmailIdRef.current = activeEmail?.id;
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const autoSaveGenerationRef = React.useRef(0);
   const composeInitializedRef = React.useRef(false);
@@ -615,6 +653,11 @@ a{color:#0078d4;cursor:pointer}
     attachmentSelectionAnchorRef.current = null;
     if (attachmentHoverPreviewTimerRef.current) clearTimeout(attachmentHoverPreviewTimerRef.current);
     attachmentHoverPreviewTimerRef.current = null;
+    setAttachmentContextMenu(null);
+    setPreviewAttachment(previous => {
+      if (previous?.url?.startsWith('blob:')) URL.revokeObjectURL(previous.url);
+      return null;
+    });
   }, [activeEmail?.id]);
 
   React.useEffect(() => () => {
@@ -812,8 +855,10 @@ a{color:#0078d4;cursor:pointer}
   const scheduleAttachmentHoverPreview = (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
     cancelAttachmentHoverPreview();
     if (!attachment.contentBase64) return;
+    const scheduledEmailId = activeEmail?.id;
     attachmentHoverPreviewTimerRef.current = setTimeout(() => {
       attachmentHoverPreviewTimerRef.current = null;
+      if (activeEmailIdRef.current !== scheduledEmailId) return;
       openPayloadPreview(attachment);
     }, 1800);
   };
@@ -908,7 +953,7 @@ a{color:#0078d4;cursor:pointer}
       composeInitializedRef.current = false;
       setComposeAttachments([]);
       setStoredAttachmentPayloads([]);
-      const signatureHtml = signatureActive && signatureText ? buildSignatureHtml(signatureText) : '';
+      const signatureHtml = signatureActive && signatureText ? buildSignatureHtml(signatureText, signatureFormat) : '';
       setComposeSignatureChoice(signatureHtml ? 'account' : 'none');
       setComposeImportance(activeEmail && ['resend', 'draft', 'outbox'].includes(composeMode)
         ? activeEmail.importance || 'normal'
@@ -1000,7 +1045,7 @@ a{color:#0078d4;cursor:pointer}
         composeInitializedRef.current = true;
       });
     }
-  }, [isWritingEmail, selectedEmailId, composeMode, signatureActive, signatureText, defaultComposeAccountEmail, accountOptions.length, focusComposeEditorAtStart]);
+  }, [isWritingEmail, selectedEmailId, composeMode, signatureActive, signatureText, signatureFormat, defaultComposeAccountEmail, accountOptions.length, focusComposeEditorAtStart]);
 
   const buildComposePayload = React.useCallback(async (): Promise<ComposeMailPayload> => {
     const freshAttachments = await Promise.all(composeAttachments.map(fileToAttachmentPayload));
@@ -1137,9 +1182,11 @@ a{color:#0078d4;cursor:pointer}
                   const nextAccountEmail = event.target.value;
                   setComposeAccountEmail(nextAccountEmail);
                   const nextSignature = accountSignatures[nextAccountEmail] ?? defaultSignatureText;
+                  const nextSignatureFormat = accountSignatureFormats[nextAccountEmail]
+                    ?? (looksLikeHtmlMailBody(nextSignature) ? 'html' : defaultSignatureFormat);
                   if (signatureActive && nextSignature) {
                     setComposeSignatureChoice('account');
-                    window.requestAnimationFrame(() => replaceComposeSignature(nextSignature));
+                    window.requestAnimationFrame(() => replaceComposeSignature(nextSignature, nextSignatureFormat));
                   }
                 }}
                 className="px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-xl bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[11.5px] transition-all font-mono"
@@ -1211,7 +1258,7 @@ a{color:#0078d4;cursor:pointer}
               id="compose-signature-select"
               value={composeSignatureChoice}
               onChange={(event) => applyComposeSignatureChoice(event.target.value as 'none' | 'account' | 'default')}
-              className="px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-lg bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[11.5px]"
+              className="h-8 max-w-[220px] px-3 py-1.5 border border-slate-200 dark:border-[#334155] rounded-lg bg-white dark:bg-[#1e293b] text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0078d4]/10 focus:border-[#0078d4] text-[10.5px] font-bold"
             >
               <option value="none">Keine Signatur</option>
               <option value="account" disabled={!accountSignatureText}>
@@ -1219,6 +1266,38 @@ a{color:#0078d4;cursor:pointer}
               </option>
               <option value="default" disabled={!defaultSignatureText}>Standard-Signatur</option>
             </select>
+          </div>
+          <div className="grid grid-cols-[60px_1fr] items-start text-xs">
+            <span className="pt-2 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">Anlagen:</span>
+            <div
+              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
+              onDrop={(event) => { event.preventDefault(); addComposeDrop(event.dataTransfer); }}
+              className="min-w-0 rounded-lg border border-dashed border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-[#0b0f19]/70"
+            >
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(event) => { if (event.target.files?.length) { addComposeFiles(event.target.files); event.target.value = ''; } }} />
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="truncate text-[10px] font-semibold text-slate-500 dark:text-slate-350">Dateien oder E-Mails hier ablegen</span>
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-slate-250 bg-white px-2.5 text-[10.5px] font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-[#1e293b] dark:text-slate-200 dark:hover:bg-slate-800">
+                  <Paperclip className="h-3.5 w-3.5" /> Anlage
+                </button>
+              </div>
+              {(storedAttachmentPayloads.length > 0 || composeAttachments.length > 0) && (
+                <div className="mt-1 flex max-h-16 flex-wrap gap-1 overflow-y-auto">
+                  {storedAttachmentPayloads.map(file => (
+                    <span key={`stored-${file.filename}-${file.contentBase64.length}`} className="inline-flex max-w-[240px] items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold dark:border-slate-700 dark:bg-[#1e293b]">
+                      {file.contentType === 'message/rfc822' && <Mail className="h-3 w-3 shrink-0 text-[#0078d4]" />}<span className="truncate">{file.filename}</span>
+                      <button type="button" onClick={() => setStoredAttachmentPayloads(previous => previous.filter(item => item !== file))} className="font-bold text-slate-400 hover:text-red-500">x</button>
+                    </span>
+                  ))}
+                  {composeAttachments.map(file => (
+                    <span key={`${file.name}-${file.size}-${file.lastModified}`} className="inline-flex max-w-[240px] items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold dark:border-slate-700 dark:bg-[#1e293b]">
+                      {(file.type === 'message/rfc822' || file.name.toLowerCase().endsWith('.eml')) && <Mail className="h-3 w-3 shrink-0 text-[#0078d4]" />}<span className="truncate">{file.name}</span>
+                      <button type="button" onClick={() => setComposeAttachments(previous => previous.filter(item => item !== file))} className="font-bold text-slate-400 hover:text-red-500">x</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1366,77 +1445,6 @@ a{color:#0078d4;cursor:pointer}
             placeholder="Geben Sie Ihren E-Mail Nachrichtentext ein..."
           />
 
-          <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = 'copy';
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              addComposeDrop(event.dataTransfer);
-            }}
-            className="border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-[#0b0f19]/70 rounded-xl p-3 text-[11px] text-slate-500 dark:text-slate-350"
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.length) {
-                  addComposeFiles(e.target.files);
-                  e.target.value = '';
-                }
-              }}
-            />
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-semibold">Dateien oder E-Mails hier ablegen</span>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="px-3 py-1.5 bg-white dark:bg-[#1e293b] border border-slate-250 dark:border-slate-700 rounded-lg text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              >
-                Anlage hinzufügen
-              </button>
-            </div>
-            {(storedAttachmentPayloads.length > 0 || composeAttachments.length > 0) && (
-              <div className="flex flex-wrap gap-2 mt-2">
-                {storedAttachmentPayloads.map((file) => (
-                  <span key={`stored-${file.filename}-${file.contentBase64.length}`} className="inline-flex items-center gap-1.5 bg-white dark:bg-[#1e293b] border border-slate-200 dark:border-slate-700 px-2.5 py-1 rounded-lg text-[10.5px] font-semibold text-slate-700 dark:text-slate-200">
-                    {file.contentType === 'message/rfc822' && <Mail className="h-3.5 w-3.5 shrink-0 text-[#0078d4]" />}
-                    <span title="Gespeicherte Anlage">{file.filename}</span>
-                    <button
-                      type="button"
-                      onClick={() => setStoredAttachmentPayloads(prev => prev.filter(item => item !== file))}
-                      className="text-slate-400 hover:text-red-500 font-bold"
-                    >
-                      x
-                    </button>
-                  </span>
-                ))}
-                {composeAttachments.map((file) => (
-                  <span key={`${file.name}-${file.size}-${file.lastModified}`} className="inline-flex items-center gap-1.5 bg-white dark:bg-[#1e293b] border border-slate-200 dark:border-slate-700 px-2.5 py-1 rounded-lg text-[10.5px] font-semibold text-slate-700 dark:text-slate-200">
-                    {(file.type === 'message/rfc822' || file.name.toLowerCase().endsWith('.eml')) && <Mail className="h-3.5 w-3.5 shrink-0 text-[#0078d4]" />}
-                    <button
-                      type="button"
-                      onClick={() => openFilePreview(file)}
-                      className="hover:text-[#0078d4] font-semibold"
-                      title="Vorschau öffnen"
-                    >
-                      {file.name}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setComposeAttachments(prev => prev.filter(item => item !== file))}
-                      className="text-slate-400 hover:text-red-500 font-bold"
-                    >
-                      x
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
           {previewAttachment && (
             <div className="fixed inset-8 z-[9999] bg-white dark:bg-[#0f172a] border border-slate-300 dark:border-slate-700 shadow-2xl rounded-xl flex flex-col overflow-hidden">
               <div className="h-10 px-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-200">
@@ -1496,7 +1504,7 @@ a{color:#0078d4;cursor:pointer}
               <button 
                 disabled={isSendingMessage}
                 onClick={async () => {
-                  if (!toInput.trim()) {
+                  if (![toInput, ccInput, bccInput].some(value => value.trim())) {
                     alert('Bitte mindestens einen Empfänger eintragen.');
                     return;
                   }

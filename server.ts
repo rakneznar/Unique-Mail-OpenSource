@@ -978,13 +978,13 @@ async function startServer() {
     const normalizedCc = normalizeAddressList(cc);
     const normalizedBcc = normalizeAddressList(bcc);
 
-    if (!email || !password || !smtpServer || !smtpPort || !from || !normalizedTo || !subject) {
+    if (!email || !password || !smtpServer || !smtpPort || !from || !(normalizedTo || normalizedCc || normalizedBcc) || !subject) {
       return res.status(400).json({ error: "Absender, Empfänger, Betreff, SMTP-Server und Passwort sind erforderlich." });
     }
 
     const mailOptions: Mail.Options = {
       from,
-      to: normalizedTo,
+      to: normalizedTo || undefined,
       cc: normalizedCc || undefined,
       bcc: normalizedBcc || undefined,
       subject,
@@ -1603,12 +1603,15 @@ Originaltext:
   // API Route: Generate/Refine Email Signature
   app.post("/api/ai/generate-signature", async (req, res) => {
     try {
-      const { currentSignature, prompt } = req.body;
+      const { currentSignature, prompt, format } = req.body;
       if (!prompt || typeof prompt !== "string") {
         return res.status(400).json({ error: "Anweisung/Prompt ist erforderlich." });
       }
 
       const aiInstance = getAI();
+      const outputInstruction = format === "html"
+        ? "Gib AUSSCHLIESSLICH ein kompaktes HTML-Fragment ohne Markdown-Codeblock, ohne <html>, <head> oder <body> zurück. Verwende mailtaugliches HTML mit Inline-CSS. Keine Skripte, Formulare oder eingebetteten Frames."
+        : "Gib AUSSCHLIESSLICH den finalen deutschen Klartext der Signatur zurück. Verwende keine HTML-Tags und keinen Markdown-Codeblock.";
       const response = await aiInstance.models.generateContent({
         model: "gemini-3.5-flash",
         contents: `Du bist ein Experte für professionelle E-Mail-Kommunikation.
@@ -1616,8 +1619,8 @@ Erstelle oder überarbeite eine professionelle E-Mail-Signatur basierend auf fol
 1. Benutzer-Vorgabe / Prompt: "${prompt}"
 2. Derzeitige Signatur (falls vorhanden): "${currentSignature || ''}"
 
-Achte darauf, dass die Signatur perfekt formatiert ist, mit einer professionellen Struktur, eleganten Abgrenzungen (z.B. "---" oder "|"), sozialen Links (als Platzhalter oder wie im Prompt), und typischen Firmendaten. Verwende Platzhalter wie [Name], [Position], [Telefon], falls im Prompt keine konkreten Angaben gemacht wurden.
-Gib AUSSCHLIESSLICH den finalen deutschen Text der fertigen Signatur zurück. Schreibe KEINE Erklärungen drumherum, keine Anmerkungen und keinen Einleitungstext ("Hier ist deine Signatur:").`
+Achte darauf, dass die Signatur perfekt formatiert ist, mit einer professionellen Struktur, eleganten Abgrenzungen, sozialen Links (als Platzhalter oder wie im Prompt), und typischen Firmendaten. Verwende Platzhalter wie [Name], [Position], [Telefon], falls im Prompt keine konkreten Angaben gemacht wurden.
+${outputInstruction} Schreibe keine Erklärungen, Anmerkungen oder Einleitung dazu.`
       });
 
       res.json({ signature: response.text });

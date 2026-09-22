@@ -140,7 +140,7 @@ export default function DetachedComposeWindow() {
   };
   const send = async () => {
     const current = currentPayload();
-    if (!current.to.trim()) {
+    if (![current.to, current.cc, current.bcc].some(value => value.trim())) {
       alert('Bitte mindestens einen Empfänger eintragen.');
       return;
     }
@@ -193,6 +193,17 @@ export default function DetachedComposeWindow() {
             <option value="low">Niedrig</option>
           </select>
         </label>
+        <div onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={event => { event.preventDefault(); void addDrop(event.dataTransfer); }} className="grid grid-cols-[62px_1fr] items-center gap-2 text-xs">
+          <span className="font-bold text-slate-500">ANLAGEN</span>
+          <div className="min-w-0 border border-dashed border-slate-300 bg-slate-50 px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800/70">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <span className="truncate text-[10px] font-bold text-slate-500">Dateien oder E-Mails hier ablegen</span>
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="inline-flex shrink-0 items-center gap-1 border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800"><Paperclip className="h-3.5 w-3.5" /> Anlage</button>
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }} />
+            </div>
+            {payload.attachments.length > 0 && <div className="mt-1.5 flex max-h-16 flex-wrap gap-1 overflow-y-auto">{payload.attachments.map((attachment, index) => <span key={`${attachment.filename}-${index}`} className="inline-flex max-w-[260px] items-center gap-1 border border-slate-200 bg-white px-2 py-1 text-[10px] dark:border-slate-600 dark:bg-slate-800">{attachment.contentType === 'message/rfc822' && <Mail className="h-3.5 w-3.5 shrink-0 text-[#0078d4]" />}<span className="truncate">{attachment.filename}</span><button type="button" onClick={() => update('attachments', payload.attachments.filter((_, itemIndex) => itemIndex !== index))} title="Anlage entfernen"><Trash2 className="h-3 w-3 text-red-500" /></button></span>)}</div>}
+          </div>
+        </div>
       </section>
 
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-slate-200 bg-slate-50 px-4 dark:border-slate-700 dark:bg-[#111827]">
@@ -205,15 +216,6 @@ export default function DetachedComposeWindow() {
       </div>
 
       <div ref={editorRef} contentEditable suppressContentEditableWarning onPaste={handlePaste} onInput={event => update('body', event.currentTarget.innerHTML)} className="min-h-0 flex-1 overflow-y-auto p-5 text-sm leading-6 outline-none" />
-
-      <div onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={event => { event.preventDefault(); void addDrop(event.dataTransfer); }} className="mx-4 mb-3 shrink-0 border border-dashed border-slate-300 p-2 dark:border-slate-600">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-[10px] font-bold text-slate-500">Dateien oder E-Mails hier ablegen</span>
-          <button type="button" onClick={() => fileInputRef.current?.click()} className="inline-flex items-center gap-1 border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800"><Paperclip className="h-3.5 w-3.5" /> Anlage</button>
-          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }} />
-        </div>
-        {payload.attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{payload.attachments.map((attachment, index) => <span key={`${attachment.filename}-${index}`} className="inline-flex max-w-[260px] items-center gap-1 border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] dark:border-slate-600 dark:bg-slate-800">{attachment.contentType === 'message/rfc822' && <Mail className="h-3.5 w-3.5 shrink-0 text-[#0078d4]" />}<span className="truncate">{attachment.filename}</span><button type="button" onClick={() => update('attachments', payload.attachments.filter((_, itemIndex) => itemIndex !== index))} title="Anlage entfernen"><Trash2 className="h-3 w-3 text-red-500" /></button></span>)}</div>}
-      </div>
 
       <footer className="flex h-14 shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 dark:border-slate-700 dark:bg-[#111827]">
         <button type="button" onClick={dock} disabled={busy} className="border border-slate-300 bg-white px-4 py-2 text-xs font-bold hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800">Andocken</button>

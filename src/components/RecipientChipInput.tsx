@@ -81,10 +81,13 @@ export default function RecipientChipInput({ value, onChange, suggestions = [], 
     inputRef.current?.focus();
   };
 
+  const renderedTokens = focused ? tokens : tokens.slice(0, 2);
+  const hiddenTokenCount = Math.max(0, tokens.length - renderedTokens.length);
+
   return (
     <div className="relative min-w-0 flex-1">
       <div
-        className="flex min-h-[32px] w-full cursor-text flex-wrap items-center gap-1 border border-slate-200 bg-white px-1.5 py-1 text-[11.5px] transition-all focus-within:border-[#0078d4] focus-within:ring-2 focus-within:ring-[#0078d4]/10 dark:border-[#334155] dark:bg-[#1e293b]"
+        className={`flex min-h-[32px] w-full cursor-text items-center gap-1 border border-slate-200 bg-white px-1.5 py-1 text-[11.5px] transition-all focus-within:border-[#0078d4] focus-within:ring-2 focus-within:ring-[#0078d4]/10 dark:border-[#334155] dark:bg-[#1e293b] ${focused ? 'max-h-36 flex-wrap overflow-y-auto' : 'h-8 flex-nowrap overflow-hidden'}`}
         onPointerDown={(event) => {
           if (event.target !== event.currentTarget) return;
           event.preventDefault();
@@ -92,7 +95,7 @@ export default function RecipientChipInput({ value, onChange, suggestions = [], 
         }}
         onClick={() => inputRef.current?.focus({ preventScroll: true })}
       >
-        {tokens.map(token => (
+        {renderedTokens.map(token => (
           <span key={token.email} title={token.raw} className="inline-flex h-6 max-w-[240px] items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 font-semibold text-blue-900 dark:border-blue-700 dark:bg-blue-950/60 dark:text-blue-100">
             <span className="truncate">{token.displayName || token.email}</span>
             <button type="button" onClick={(event) => { event.stopPropagation(); removeToken(token.email); }} className="shrink-0 text-blue-600 hover:text-red-600 dark:text-blue-300" title={`${token.email} entfernen`} aria-label={`${token.email} entfernen`}>
@@ -100,6 +103,11 @@ export default function RecipientChipInput({ value, onChange, suggestions = [], 
             </button>
           </span>
         ))}
+        {!focused && hiddenTokenCount > 0 && (
+          <span className="inline-flex h-6 shrink-0 items-center rounded border border-slate-200 bg-slate-100 px-2 font-bold text-slate-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200" title={`${hiddenTokenCount} weitere Empfänger`}>
+            +{hiddenTokenCount}
+          </span>
+        )}
         <input
           ref={inputRef}
           value={draft}
@@ -173,7 +181,7 @@ export default function RecipientChipInput({ value, onChange, suggestions = [], 
           aria-expanded={focused && visibleSuggestions.length > 0}
           autoComplete="off"
           placeholder={tokens.length === 0 ? placeholder : ''}
-          className="h-6 min-w-[150px] flex-1 bg-transparent px-1 font-mono text-slate-800 outline-none dark:text-white"
+          className={`h-6 flex-1 bg-transparent px-1 font-mono text-slate-800 outline-none dark:text-white ${focused || tokens.length === 0 ? 'min-w-[150px]' : 'min-w-[24px]'}`}
         />
       </div>
       {focused && visibleSuggestions.length > 0 && (
