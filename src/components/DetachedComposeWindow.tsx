@@ -2,7 +2,7 @@ import React from 'react';
 import { Bold, Italic, Underline, List, ListOrdered, Mail, Paperclip, Send, PanelTopClose, Trash2, ShieldAlert } from 'lucide-react';
 import type { ComposeMailPayload } from './ReadingPane';
 import { useComposePastePrompt } from './ComposePastePrompt';
-import { readEmlAttachmentsFromDrop } from '../utils/eml';
+import { readEmlAttachmentsFromDropAsync } from '../utils/eml';
 import RecipientChipInput from './RecipientChipInput';
 
 type Account = { email: string; displayName?: string; senderName?: string; name?: string };
@@ -123,12 +123,13 @@ export default function DetachedComposeWindow() {
     setPayload(previous => ({ ...previous, attachments: [...previous.attachments, ...next] }));
   };
   const addDrop = async (dataTransfer: DataTransfer) => {
-    const messageAttachments = readEmlAttachmentsFromDrop(dataTransfer);
+    const droppedFiles = Array.from(dataTransfer.files || []);
+    const messageAttachments = await readEmlAttachmentsFromDropAsync(dataTransfer);
     if (messageAttachments.length > 0) {
       setPayload(previous => ({ ...previous, attachments: [...previous.attachments, ...messageAttachments] }));
       return;
     }
-    if (dataTransfer.files?.length) await addFiles(dataTransfer.files);
+    if (droppedFiles.length) await addFiles(droppedFiles);
   };
   const dock = async () => {
     setBusy(true);

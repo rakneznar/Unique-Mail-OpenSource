@@ -684,10 +684,8 @@ export default function ItemList({
                   e.dataTransfer.effectAllowed = 'copyMove';
                   e.dataTransfer.setData('application/x-unique-mail-ids', JSON.stringify(ids));
                   e.dataTransfer.setData('text/plain', ids.join(','));
-                  addEmailsToDragData(
-                    e.dataTransfer,
-                    ids.map(id => emails.find(item => item.id === id)).filter((item): item is Email => Boolean(item))
-                  );
+                  const dragIds = new Set(ids);
+                  addEmailsToDragData(e.dataTransfer, emails.filter(item => dragIds.has(item.id)));
                 }}
                 onClick={(e) => {
                   listKeyboardRef.current?.focus();

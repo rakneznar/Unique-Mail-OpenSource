@@ -2,6 +2,27 @@ import type { Email } from '../types';
 import type { ComposeAttachmentPayload } from '../components/ReadingPane';
 
 export const UNIQUE_MAIL_EML_DRAG_TYPE = 'application/x-unique-mail-eml-attachments';
+const UNIQUE_MAIL_EML_DRAG_TOKEN_TYPE = 'application/x-unique-mail-eml-token';
+let activeDraggedEmails: { token: string; emails: Email[] } | null = null;
+let dragChannel: BroadcastChannel | null = null;
+
+const getDragChannel = () => {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  if (!dragChannel) {
+    dragChannel = new BroadcastChannel('unique-mail-eml-drag');
+    dragChannel.onmessage = event => {
+      const request = event.data as { kind?: string; token?: string; requestId?: string };
+      if (request?.kind !== 'request' || !request.requestId ||
+          !activeDraggedEmails || activeDraggedEmails.token !== request.token) return;
+      dragChannel?.postMessage({
+        kind: 'response',
+        requestId: request.requestId,
+        attachments: activeDraggedEmails.emails.map(emailToEmlAttachment)
+      });
+    };
+  }
+  return dragChannel;
+};
 
 const encodeUtf8Base64 = (value: string) => {
   const bytes = new TextEncoder().encode(value);
@@ -93,6 +114,14 @@ export const emailToEmlAttachment = (email: Email): ComposeAttachmentPayload => 
 });
 
 export const addEmailsToDragData = (dataTransfer: DataTransfer, emails: Email[]) => {
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  activeDraggedEmails = { token, emails };
+  getDragChannel();
+  dataTransfer.setData(UNIQUE_MAIL_EML_DRAG_TOKEN_TYPE, token);
+  // Keep native .eml drops for small single messages. Large and multi-message
+  // exports are generated only when dropped into the in-app composer.
+  if (emails.length !== 1 || (emails[0].body?.length || 0) > 32_000 ||
+      emails[0].attachments?.some(attachment => attachment.contentBase64)) return;
   const attachments = emails.map(emailToEmlAttachment);
   dataTransfer.setData(UNIQUE_MAIL_EML_DRAG_TYPE, JSON.stringify(attachments));
   attachments.forEach(attachment => {
@@ -107,6 +136,10 @@ export const addEmailsToDragData = (dataTransfer: DataTransfer, emails: Email[])
 
 export const readEmlAttachmentsFromDrop = (dataTransfer: DataTransfer): ComposeAttachmentPayload[] => {
   try {
+    const token = dataTransfer.getData(UNIQUE_MAIL_EML_DRAG_TOKEN_TYPE);
+    if (token && activeDraggedEmails?.token === token) {
+      return activeDraggedEmails.emails.map(emailToEmlAttachment);
+    }
     const raw = dataTransfer.getData(UNIQUE_MAIL_EML_DRAG_TYPE);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
@@ -116,4 +149,27 @@ export const readEmlAttachmentsFromDrop = (dataTransfer: DataTransfer): ComposeA
   } catch {
     return [];
   }
+};
+
+export const readEmlAttachmentsFromDropAsync = async (dataTransfer: DataTransfer): Promise<ComposeAttachmentPayload[]> => {
+  const local = readEmlAttachmentsFromDrop(dataTransfer);
+  if (local.length) return local;
+  const token = dataTransfer.getData(UNIQUE_MAIL_EML_DRAG_TOKEN_TYPE);
+  const channel = token ? getDragChannel() : null;
+  if (!channel) return [];
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise(resolve => {
+    const timeout = window.setTimeout(() => {
+      channel.removeEventListener('message', onResponse);
+      resolve([]);
+    }, 10_000);
+    const onResponse = (event: MessageEvent) => {
+      if (event.data?.kind !== 'response' || event.data?.requestId !== requestId) return;
+      window.clearTimeout(timeout);
+      channel.removeEventListener('message', onResponse);
+      resolve(Array.isArray(event.data.attachments) ? event.data.attachments : []);
+    };
+    channel.addEventListener('message', onResponse);
+    channel.postMessage({ kind: 'request', token, requestId });
+  });
 };

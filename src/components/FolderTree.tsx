@@ -847,13 +847,13 @@ export default function FolderTree({
                         onDragEnter={(event) => {
                           if (folder.isSelectable === false) return;
                           event.preventDefault();
-                          setMessageDropTargetKey(folderNodeKey(account.email, folder.id));
+                          setMessageDropTargetKey(previous => previous === folderNodeKey(account.email, folder.id) ? previous : folderNodeKey(account.email, folder.id));
                         }}
                         onDragOver={(event) => {
                           if (folder.isSelectable === false) return;
                           event.preventDefault();
                           event.dataTransfer.dropEffect = 'move';
-                          setMessageDropTargetKey(folderNodeKey(account.email, folder.id));
+                          setMessageDropTargetKey(previous => previous === folderNodeKey(account.email, folder.id) ? previous : folderNodeKey(account.email, folder.id));
                         }}
                         onDragLeave={(event) => {
                           const nextTarget = event.relatedTarget as Node | null;
