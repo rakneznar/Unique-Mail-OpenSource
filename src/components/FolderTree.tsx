@@ -172,15 +172,8 @@ export default function FolderTree({
 
   useEffect(() => {
     localStorage.setItem('uniquemail_folder_favorites', JSON.stringify(favoriteFolderEntries));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
   }, [favoriteFolderEntries]);
-
-  useEffect(() => {
-    setFavoriteFolderEntries(previous => previous.filter(favorite => {
-      const account = accounts.find(item => item.email.toLowerCase() === favorite.accountEmail.toLowerCase());
-      if (!account || !Array.isArray(account.serverFolders) || account.serverFolders.length === 0) return true;
-      return account.serverFolders.some(folder => normalizeFolderKey(folder.path || folder.id) === normalizeFolderKey(favorite.id));
-    }));
-  }, [accounts]);
 
   useEffect(() => {
     const reloadFavoriteFolders = () => {
@@ -316,7 +309,10 @@ export default function FolderTree({
     const normalizedFolder = normalizeFolderKey(folderId);
     return folderStats.unreadCounts.get(accountKey + '::' + normalizedFolder) || 0;
   };
-  const favoriteFolders = favoriteFolderEntries.map(entry => ({
+  const favoriteFolders = favoriteFolderEntries.filter(entry => {
+    const account = accounts.find(item => item.email.toLowerCase() === entry.accountEmail.toLowerCase());
+    return !account?.serverFolders?.length || account.serverFolders.some(folder => normalizeFolderKey(folder.path || folder.id) === normalizeFolderKey(entry.id));
+  }).map(entry => ({
     ...entry,
     icon: inferFolderIcon(entry.id),
     count: getFolderUnreadCount(entry.accountEmail, entry.id)

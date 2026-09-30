@@ -963,3 +963,48 @@ textarea:not(:disabled):not([readonly]),
   color: #f8fafc !important;
   border-color: #334155 !important;
 }
+
+/* Softer dark workspace with distinct reading, list and navigation surfaces. */
+.dark body,
+.dark #outlook-app-frame,
+.dark #navigation-rail,
+.dark #folder-tree-sidebar,
+.dark #item-list-container,
+.dark #mail-reading-pane {
+  color: #e4eaf0 !important;
+}
+
+.dark body,
+.dark #outlook-app-frame { background-color: #20272e !important; }
+.dark #outlook-ribbon,
+.dark #outlook-ribbon > div { background-color: #28313a !important; border-color: #394650 !important; }
+.dark #navigation-rail { background-color: #252e37 !important; border-color: #394650 !important; }
+.dark #folder-tree-sidebar { background-color: #2a343e !important; border-color: #41505a !important; }
+.dark #item-list-container,
+.dark #item-list-container .bg-slate-50\/50,
+.dark #item-list-container .bg-slate-50,
+.dark #item-list-container .h-12,
+.dark #item-list-container .h-10 { background-color: #263039 !important; border-color: #41505a !important; }
+.dark #item-list-container [id^="email-item-"] { background-color: #303b45 !important; border-color: #465560 !important; }
+.dark #item-list-container [id^="email-item-"]:hover { background-color: #3b4954 !important; border-color: #72b7dc !important; }
+.dark #item-list-container [id^="email-item-"].border-\[\#0078d4\],
+.dark #item-list-container [id^="email-item-"][class*="border-[#0078d4]"] { background-color: #385266 !important; border-color: #79c2e7 !important; }
+.dark #mail-reading-pane { background-color: #26313a !important; }
+.dark #mail-reading-pane > .p-6,
+.dark #mail-reading-pane .bg-slate-50\/25,
+.dark #mail-reading-pane .bg-\[\#fbfbfb\] { background-color: #2c3943 !important; border-color: #465560 !important; }
+.dark #folder-tree-sidebar .text-slate-600,
+.dark #folder-tree-sidebar .text-slate-500,
+.dark #folder-tree-sidebar .text-slate-450,
+.dark #folder-tree-sidebar .text-slate-400,
+.dark #item-list-container [id^="email-item-"] .text-slate-500,
+.dark #item-list-container [id^="email-item-"] .text-slate-450,
+.dark #item-list-container [id^="email-item-"] .text-slate-400,
+.dark #mail-reading-pane .text-slate-500,
+.dark #mail-reading-pane .text-slate-400 { color: #c0cbd4 !important; }
+.dark #mail-reading-pane .bg-white.border.border-slate-200 {
+  background-color: #35444f !important;
+  border-color: #536570 !important;
+  color: #9ad6f4 !important;
+}
+.dark #outlook-statusbar { background-color: #28313a !important; border-color: #41505a !important; color: #c0cbd4 !important; }

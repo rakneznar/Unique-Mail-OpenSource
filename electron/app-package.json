@@ -1,6 +1,6 @@
 {
   "name": "unique-mail",
-  "version": "0.5.65",
+  "version": "0.5.66",
   "main": "electron/main.cjs",
   "private": true
 }

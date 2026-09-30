@@ -55,6 +55,7 @@ interface ReadingPaneProps {
   isWritingEmail: boolean;
   setIsWritingEmail: (val: boolean) => void;
   composeMode: ComposeMode;
+  forwardSourceEmail?: Email | null;
   onSendEmail: (message: ComposeMailPayload) => Promise<void> | void;
   onSaveDraft: (message: ComposeMailPayload) => Promise<void> | void;
   onAutoSaveDraft?: (message: ComposeMailPayload) => void;
@@ -102,6 +103,7 @@ export default function ReadingPane({
   isWritingEmail,
   setIsWritingEmail,
   composeMode,
+  forwardSourceEmail,
   onSendEmail,
   onSaveDraft,
   onAutoSaveDraft,
@@ -991,13 +993,19 @@ a{color:#0078d4;cursor:pointer}
           editorRef.current.innerHTML = activeEmail.body || '';
         }
       } else if (activeEmail && composeMode === 'forward') {
+        const sourceMail = forwardSourceEmail?.id === activeEmail.id ? forwardSourceEmail : activeEmail;
+        setStoredAttachmentPayloads((sourceMail.attachments || []).filter(attachment => !!attachment.contentBase64).map(attachment => ({
+          filename: attachment.filename,
+          contentType: attachment.contentType || 'application/octet-stream',
+          contentBase64: attachment.contentBase64!
+        })));
         setComposeDraftId(`draft-${Date.now()}`);
         setToInput('');
         setCcInput('');
         setBccInput('');
         setShowCcBcc(false);
         setSubjectInput(activeEmail.subject.startsWith('FW:') ? activeEmail.subject : `FW: ${activeEmail.subject}`);
-        const forwardTemplate = `<br/><br/>${signatureHtml}<br/><br/><div data-unique-mail-quote="true" style="border-top:1px solid #e0e0e0; padding-top:10px; margin-top:20px; color:#555555; font-size:11px; font-family:sans-serif;"><b>Weitergeleitete Nachricht:</b><br/><b>Von:</b> ${activeEmail.sender} &lt;${activeEmail.senderEmail}&gt;<br/><b>Datum:</b> ${new Date(activeEmail.date).toLocaleString('de-DE')}<br/><b>Betreff:</b> ${activeEmail.subject}<br/><br/>${activeEmail.body.replace(/\n/g, '<br/>')}</div>`;
+        const forwardTemplate = `<br/><br/>${signatureHtml}<br/><br/><div data-unique-mail-quote="true" style="border-top:1px solid #e0e0e0; padding-top:10px; margin-top:20px; color:#555555; font-size:11px; font-family:sans-serif;"><b>Weitergeleitete Nachricht:</b><br/><b>Von:</b> ${sourceMail.sender} &lt;${sourceMail.senderEmail}&gt;<br/><b>Datum:</b> ${new Date(sourceMail.date).toLocaleString('de-DE')}<br/><b>Betreff:</b> ${sourceMail.subject}<br/><br/>${sourceMail.body.replace(/\n/g, '<br/>')}</div>`;
         setBodyInput(forwardTemplate);
         if (editorRef.current) {
           editorRef.current.innerHTML = forwardTemplate;

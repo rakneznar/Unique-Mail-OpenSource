@@ -20,7 +20,7 @@ import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.65';
+const APP_VERSION = '0.5.66';
 const DEVELOPER_PASSWORD_SALT = 'unique-mail-wpf-suite-admin-v1';
 const DEVELOPER_PASSWORD_HASH = 'b85432d324dda9a402159fe262e0c3280cea9a522894a5710aaf60071253d111';
 (window as any).uniqueMailNative?.restoreRendererStorage?.();
@@ -106,6 +106,7 @@ const DEFAULT_MAIL_DATE_FORMAT = 'dd.MM.yyyy';
 const RECIPIENT_HISTORY_STORAGE_KEY = 'uniquemail_recipient_history';
 const PENDING_MAIL_MUTATIONS_STORAGE_KEY = 'uniquemail_pending_mail_mutations_v1';
 const PINNED_MAIL_KEYS_STORAGE_KEY = 'uniquemail_pinned_mail_keys_v1';
+const FAVORITE_MAIL_KEYS_STORAGE_KEY = 'uniquemail_favorite_mail_keys_v1';
 
 const mailPinIdentityKeys = (mail: Email) => {
   const account = String(mail.accountEmail || '').trim().toLowerCase();
@@ -1299,7 +1300,7 @@ exit`;
     }
     const payload = {
       app: 'Unique Mail',
-      schema: 'unique-mail.settings.v8',
+      schema: 'unique-mail.settings.v9',
       version: APP_VERSION,
       exportedAt: new Date().toISOString(),
       settings: {
@@ -1343,6 +1344,7 @@ exit`;
           categoriesList,
           recipientHistory,
           folderFavorites: normalizeImportedArray(readLocalStorageJson('uniquemail_folder_favorites', [])),
+          mailFavoriteKeys: Object.fromEntries(favoriteMailKeysRef.current),
           quickSteps,
           mailPreferences: sanitizeMailPreferences(emails)
         }
@@ -1489,6 +1491,17 @@ exit`;
           localStorage.setItem('uniquemail_folder_favorites', JSON.stringify(settings.workspace.folderFavorites));
           window.dispatchEvent(new CustomEvent('uniquemail-folder-favorites-updated'));
         }
+        const importedFavoriteKeys = settings.workspace.mailFavoriteKeys;
+        if (importedFavoriteKeys && typeof importedFavoriteKeys === 'object' && !Array.isArray(importedFavoriteKeys)) {
+          favoriteMailKeysRef.current = new Map(Object.entries(importedFavoriteKeys)
+            .filter(([key, value]) => key.length > 0 && typeof value === 'boolean') as [string, boolean][]);
+        } else if (Array.isArray(settings.workspace.mailPreferences)) {
+          settings.workspace.mailPreferences.forEach((pref: any) => {
+            if (typeof pref?.isFavorite !== 'boolean') return;
+            mailPinIdentityKeys(pref as Email).forEach(key => favoriteMailKeysRef.current.set(key, pref.isFavorite));
+          });
+        }
+        localStorage.setItem(FAVORITE_MAIL_KEYS_STORAGE_KEY, JSON.stringify(Object.fromEntries(favoriteMailKeysRef.current)));
         if (Array.isArray(settings.workspace.mailPreferences)) {
           const byId = new Map<string, any>();
           const byKey = new Map<string, any>();
@@ -1831,9 +1844,14 @@ exit`;
   const [emails, setEmails] = useState<Email[]>([]);
   const [browserMailCacheLoaded, setBrowserMailCacheLoaded] = useState(false);
   const pinnedMailKeysRef = useRef<Set<string>>(new Set(readJsonStorage<string[]>(PINNED_MAIL_KEYS_STORAGE_KEY, [])));
+  const favoriteMailKeysRef = useRef<Map<string, boolean>>(new Map(Object.entries(readJsonStorage<Record<string, boolean>>(FAVORITE_MAIL_KEYS_STORAGE_KEY, {}))));
   const applyPersistedPin = (mail: Email): Email => mailPinIdentityKeys(mail).some(key => pinnedMailKeysRef.current.has(key))
     ? { ...mail, isPinned: true }
     : mail;
+  const applyPersistedFavorite = (mail: Email): Email => {
+    const saved = mailPinIdentityKeys(mail).map(key => favoriteMailKeysRef.current.get(key)).find(value => value !== undefined);
+    return saved === undefined ? mail : { ...mail, isFavorite: saved };
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1844,8 +1862,11 @@ exit`;
         const cachedEmails = readJsonStorage<Email[]>('outlook_emails', []);
         const restoredEmails = Array.isArray(cachedEmails) ? cachedEmails : [];
         restoredEmails.filter(mail => mail.isPinned).forEach(mail => mailPinIdentityKeys(mail).forEach(key => pinnedMailKeysRef.current.add(key)));
+        restoredEmails.filter(mail => mail.isFavorite && !mailPinIdentityKeys(mail).some(key => favoriteMailKeysRef.current.has(key)))
+          .forEach(mail => mailPinIdentityKeys(mail).forEach(key => favoriteMailKeysRef.current.set(key, true)));
         localStorage.setItem(PINNED_MAIL_KEYS_STORAGE_KEY, JSON.stringify(Array.from(pinnedMailKeysRef.current)));
-        setEmails(restoredEmails.map(applyPersistedPin));
+        localStorage.setItem(FAVORITE_MAIL_KEYS_STORAGE_KEY, JSON.stringify(Object.fromEntries(favoriteMailKeysRef.current)));
+        setEmails(restoredEmails.map(mail => applyPersistedFavorite(applyPersistedPin(mail))));
         setBrowserMailCacheLoaded(true);
       }, 50);
     });
@@ -2074,6 +2095,7 @@ exit`;
   const [isOffline, setIsOffline] = useState<boolean>(false);
   const [isWritingEmail, setIsWritingEmail] = useState<boolean>(false);
   const [composeMode, setComposeMode] = useState<ComposeMode>('new');
+  const [forwardSourceEmail, setForwardSourceEmail] = useState<Email | null>(null);
   const restoredComposeDraftRef = useRef(false);
   const draftOriginalsRef = useRef<Map<string, Email>>(new Map());
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -2940,10 +2962,7 @@ exit`;
     if (!currentMail) return;
 
     if (qs.action === 'forward') {
-      setComposeMode('forward');
-      setIsWritingEmail(true);
-      setCurrentPage('mail');
-      alert(`QuickStep '${qs.name}' ausgeführt: Das Mail-Schreibfenster wurde für '${currentMail.subject}' geladen.`);
+      void handleForward();
     } else if (qs.action === 'mark_read_and_archive') {
       setEmails(prev => prev.map(e => e.id === selectedEmailId ? { ...e, category: qs.targetCategory || e.category } : e));
       setEmailsReadState([selectedEmailId], true);
@@ -3025,8 +3044,30 @@ exit`;
     setCurrentPage('mail');
   };
 
-  const handleForward = () => {
-    if (!selectedEmailId) return;
+  const handleForward = async () => {
+    const selectedMail = emails.find(mail => mail.id === selectedEmailId);
+    if (!selectedMail) return;
+    let sourceMail = selectedMail;
+    const attachmentsIncomplete = selectedMail.hasAttachment &&
+      (!selectedMail.attachments?.length || selectedMail.attachments.some(attachment => !attachment.contentBase64));
+    if (mailBodyNeedsLoading(selectedMail) || attachmentsIncomplete) {
+      setSyncStatusText('Nachricht und Anlagen für die Weiterleitung werden geladen...');
+      const loadedMail = await loadMessageBody(selectedMail, 110, true, attachmentsIncomplete);
+      if (loadedMail) sourceMail = { ...selectedMail, ...loadedMail, bodyLoaded: true };
+    }
+    if (sourceMail.hasAttachment &&
+        (!sourceMail.attachments?.length || sourceMail.attachments.some(attachment => !attachment.contentBase64))) {
+      setSyncStatusText('Die Anlagen konnten nicht vollständig geladen werden.');
+      alert('Die Weiterleitung wurde nicht geöffnet, weil Anlagen fehlen. Bitte Verbindung prüfen und erneut versuchen.');
+      return;
+    }
+    if (!sourceMail.body && sourceMail.imapUid) {
+      setSyncStatusText('Der Nachrichtentext konnte nicht vollständig geladen werden.');
+      alert('Die Weiterleitung wurde nicht geöffnet, weil der Nachrichtentext fehlt. Bitte Verbindung prüfen und erneut versuchen.');
+      return;
+    }
+    setSelectedEmailId(sourceMail.id);
+    setForwardSourceEmail(sourceMail);
     setComposeMode('forward');
     setIsWritingEmail(true);
     setCurrentPage('mail');
@@ -3136,7 +3177,7 @@ exit`;
     const accountLower = accountEmail.toLowerCase();
     const authoritativeFolderSnapshot = Array.isArray(serverFolders);
     const failedFolderKeys = new Set(failedFolders.map(normalizeMailFolderKey));
-    const guardedSyncedEmails = syncedEmails.map(mail => applyPersistedPin(guardBlockedSenderMail(mail)));
+    const guardedSyncedEmails = syncedEmails.map(mail => applyPersistedFavorite(applyPersistedPin(guardBlockedSenderMail(mail))));
     const incomingById = new Map(guardedSyncedEmails.map(mail => [mail.id, mail]));
     const merged = previous.map(mail => {
       const owner = (mail.accountEmail || '').toLowerCase();
@@ -3410,7 +3451,7 @@ exit`;
       if (!response.ok) throw new Error(data.error || 'Nachrichtentext konnte nicht geladen werden.');
       const fullEmail = data.email as Email | undefined;
       if (!fullEmail) return;
-      setEmails(prev => prev.map(item => item.id === mail.id ? { ...item, ...fullEmail, bodyLoaded: true } : item));
+      setEmails(prev => prev.map(item => item.id === mail.id ? applyPersistedFavorite({ ...item, ...fullEmail, bodyLoaded: true }) : item));
       return fullEmail;
     };
 
@@ -4430,7 +4471,11 @@ exit`;
   const toggleEmailFavoriteById = (id: string) => {
     const target = emails.find(e => e.id === id);
     if (!target) return;
-    setEmails(prev => prev.map(e => e.id === id ? { ...e, isFavorite: !e.isFavorite } : e));
+    const nextFavorite = !target.isFavorite;
+    mailPinIdentityKeys(target).forEach(key => favoriteMailKeysRef.current.set(key, nextFavorite));
+    localStorage.setItem(FAVORITE_MAIL_KEYS_STORAGE_KEY, JSON.stringify(Object.fromEntries(favoriteMailKeysRef.current)));
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+    setEmails(prev => prev.map(e => e.id === id ? { ...e, isFavorite: nextFavorite } : e));
     triggerPostActionSync('Favorit geändert', [target]);
   };
 
@@ -4968,6 +5013,7 @@ exit`;
               isWritingEmail={isWritingEmail}
               setIsWritingEmail={setIsWritingEmail}
               composeMode={composeMode}
+              forwardSourceEmail={forwardSourceEmail}
               onSendEmail={handleSendEmail}
               onSaveDraft={handleSaveDraft}
               onAutoSaveDraft={handleAutoSaveDraft}
