@@ -622,6 +622,7 @@ a{color:#0078d4;cursor:pointer}
   const [selectedAttachmentIndexes, setSelectedAttachmentIndexes] = React.useState<number[]>([]);
   const attachmentSelectionAnchorRef = React.useRef<number | null>(null);
   const attachmentHoverPreviewTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attachmentHoverCandidateRef = React.useRef<string | null>(null);
   const activeEmailIdRef = React.useRef(activeEmail?.id);
   activeEmailIdRef.current = activeEmail?.id;
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
@@ -655,6 +656,7 @@ a{color:#0078d4;cursor:pointer}
     attachmentSelectionAnchorRef.current = null;
     if (attachmentHoverPreviewTimerRef.current) clearTimeout(attachmentHoverPreviewTimerRef.current);
     attachmentHoverPreviewTimerRef.current = null;
+    attachmentHoverCandidateRef.current = null;
     setAttachmentContextMenu(null);
     setPreviewAttachment(previous => {
       if (previous?.url?.startsWith('blob:')) URL.revokeObjectURL(previous.url);
@@ -852,15 +854,27 @@ a{color:#0078d4;cursor:pointer}
   const cancelAttachmentHoverPreview = () => {
     if (attachmentHoverPreviewTimerRef.current) clearTimeout(attachmentHoverPreviewTimerRef.current);
     attachmentHoverPreviewTimerRef.current = null;
+    attachmentHoverCandidateRef.current = null;
   };
 
-  const scheduleAttachmentHoverPreview = (attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string }) => {
-    cancelAttachmentHoverPreview();
-    if (!attachment.contentBase64) return;
+  const scheduleAttachmentHoverPreview = (
+    attachment: { filename: string; contentType?: string; size?: number; contentBase64?: string },
+    index: number,
+    element: HTMLButtonElement,
+    pointerX: number,
+    pointerY: number
+  ) => {
+    if (!attachment.contentBase64 || previewAttachment) return;
     const scheduledEmailId = activeEmail?.id;
+    const candidateKey = `${scheduledEmailId}:${index}:${attachmentDragKey(attachment)}`;
+    if (attachmentHoverCandidateRef.current === candidateKey) return;
+    cancelAttachmentHoverPreview();
+    attachmentHoverCandidateRef.current = candidateKey;
     attachmentHoverPreviewTimerRef.current = setTimeout(() => {
       attachmentHoverPreviewTimerRef.current = null;
-      if (activeEmailIdRef.current !== scheduledEmailId) return;
+      if (activeEmailIdRef.current !== scheduledEmailId || attachmentHoverCandidateRef.current !== candidateKey || !element.isConnected) return;
+      const underPointer = document.elementFromPoint(pointerX, pointerY);
+      if (!underPointer || !element.contains(underPointer)) return;
       openPayloadPreview(attachment);
     }, 1800);
   };
@@ -1778,7 +1792,8 @@ a{color:#0078d4;cursor:pointer}
                   onClick={(event) => selectAttachment(index, event)}
                   onDoubleClick={() => void openAttachmentInDefaultApp(attachment)}
                   draggable={!!attachment.contentBase64}
-                  onMouseEnter={() => { void prepareAttachmentDragOut(attachment); scheduleAttachmentHoverPreview(attachment); }}
+                  onMouseEnter={() => { void prepareAttachmentDragOut(attachment); }}
+                  onMouseMove={(event) => scheduleAttachmentHoverPreview(attachment, index, event.currentTarget, event.clientX, event.clientY)}
                   onMouseLeave={cancelAttachmentHoverPreview}
                   onFocus={() => void prepareAttachmentDragOut(attachment)}
                   onDragStart={(event) => { cancelAttachmentHoverPreview(); startAttachmentDragOut(event, attachment); }}
