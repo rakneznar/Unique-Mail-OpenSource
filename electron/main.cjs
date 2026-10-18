@@ -6,6 +6,7 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 const { printableEmailDocument } = require('./print-email-document.cjs');
+const { readFavoriteStateFile, writeFavoriteStateFile } = require('./favorite-state.cjs');
 
 const DEFAULT_UPDATE_FEED_URL = 'https://github.com/rakneznar/Unique-Mail-OpenSource/releases/latest/download/latest.json';
 let PORT = 0;
@@ -125,6 +126,20 @@ function rendererStoragePath() {
   return path.join(settingsDir, 'renderer-storage.json');
 }
 
+function favoriteStatePath() {
+  const settingsDir = uniqueMailDataPaths?.settingsDir || app.getPath('userData');
+  fs.mkdirSync(settingsDir, { recursive: true });
+  return path.join(settingsDir, 'favorite-state.json');
+}
+
+function readFavoriteState() {
+  return readFavoriteStateFile(favoriteStatePath(), log);
+}
+
+function writeFavoriteState(patch) {
+  return writeFavoriteStateFile(favoriteStatePath(), patch, log);
+}
+
 function readRendererStorageSnapshot() {
   try {
     const target = rendererStoragePath();
@@ -172,6 +187,19 @@ ipcMain.on('native:renderer-storage-save', (event, values) => {
     event.returnValue = { ok: true, count: writeRendererStorageSnapshot(values) };
   } catch (error) {
     log(`renderer storage write failed: ${error.message || String(error)}`);
+    event.returnValue = { ok: false, error: error.message || String(error) };
+  }
+});
+
+ipcMain.on('native:favorite-state-load', (event) => {
+  event.returnValue = readFavoriteState();
+});
+
+ipcMain.on('native:favorite-state-save', (event, patch) => {
+  try {
+    event.returnValue = { ok: true, ...writeFavoriteState(patch) };
+  } catch (error) {
+    log(`favorite state write failed: ${error.message || String(error)}`);
     event.returnValue = { ok: false, error: error.message || String(error) };
   }
 });
@@ -1121,7 +1149,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.5.69 <span class="unique-version-current">aktuell</span></h3><ul><li>Der isolierte HTML-Mailkoerper folgt dem Hell-/Dunkelmodus sofort und bleibt mit farberhaltender Darstellung lesbar.</li><li>Die dunkle Oberflaeche verwendet ruhigere, neutralere Flaechen und klarere Kontraste zwischen Navigation, Nachrichtenliste und Lesebereich.</li><li>Der Versionsbutton zeigt die echte installierte App-Version; fehlende Eintraege von 0.4.58 bis 0.5.63 wurden im Versionsverlauf nachgetragen.</li><li>Auch der Versionsverlauf besitzt nun eine vollstaendige Darkmode-Darstellung.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.70 <span class="unique-version-current">aktuell</span></h3><ul><li>Nachrichten- und Ordnerfavoriten werden in einer eigenen dauerhaften Datei mit Sicherungskopie gespeichert und beim Upgrade automatisch aus dem bisherigen Speicher migriert.</li><li>Abgekoppelte Verfassenfenster koennen globale Einstellungen und Favoriten nicht mehr mit einem aelteren Zustand ueberschreiben.</li><li>Unvollstaendige Server-Ordnerlisten und kurzzeitige Lesefehler blenden oder loeschen Ordnerfavoriten nicht mehr.</li><li>Message-ID und rueckwaertskompatible Identitaeten halten Nachrichtenfavoriten bei Konto-, Ordner-, UID- und Pfadwechseln stabil.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.69</h3><ul><li>Der isolierte HTML-Mailkoerper folgt dem Hell-/Dunkelmodus sofort und bleibt mit farberhaltender Darstellung lesbar.</li><li>Die dunkle Oberflaeche verwendet ruhigere, neutralere Flaechen und klarere Kontraste zwischen Navigation, Nachrichtenliste und Lesebereich.</li><li>Der Versionsbutton zeigt die echte installierte App-Version; fehlende Eintraege von 0.4.58 bis 0.5.63 wurden im Versionsverlauf nachgetragen.</li><li>Auch der Versionsverlauf besitzt nun eine vollstaendige Darkmode-Darstellung.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.68</h3><ul><li>Das Ziehen grosser oder mehrerer Nachrichten blockiert nicht mehr beim Start durch die sofortige EML-Dateierzeugung.</li><li>Beim Ablegen in den Verfassen-Editor werden Mail-Anhaenge bei Bedarf erzeugt, auch im abgekoppelten Fenster.</li><li>Die Ordner-Zielmarkierung aktualisiert sich beim Ziehen ohne redundante Statuswechsel.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.67</h3><ul><li>Die Anhangsvorschau oeffnet sich nach einem Mailwechsel nicht erneut durch ein kuenstliches Hover-Ereignis.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.66</h3><ul><li>Weitergeleitete Nachrichten uebernehmen ihre vollstaendig geladenen Anlagen automatisch. Bei fehlenden Dateidaten wird die Weiterleitung mit einer klaren Meldung angehalten.</li><li>Mail-Favoriten werden unabhaengig vom begrenzten Schnellcache dauerhaft gespeichert und nach einem Abgleich wiederhergestellt.</li><li>Ordner-Favoriten bleiben bei voruebergehend unvollstaendigen Server-Ordnerlisten erhalten.</li><li>Der Darkmode verwendet ruhigere Flaechen und besser lesbare Kontraste in Navigation, Nachrichtenliste und Lesefenster.</li></ul></article>',

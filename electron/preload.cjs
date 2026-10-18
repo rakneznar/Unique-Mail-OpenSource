@@ -1,5 +1,24 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const isDetachedComposeRenderer = new URLSearchParams(globalThis.location?.search || '').get('uniqueMailDetachedCompose') === '1';
+const MAIL_FAVORITES_KEY = 'uniquemail_favorite_mail_keys_v1';
+const FOLDER_FAVORITES_KEY = 'uniquemail_folder_favorites';
+
+function readJsonStorageValue(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function persistFavoriteState() {
+  if (isDetachedComposeRenderer) return { ok: true, skipped: true };
+  return ipcRenderer.sendSync('native:favorite-state-save', {
+    mailFavoriteKeys: readJsonStorageValue(MAIL_FAVORITES_KEY, {}),
+    folderFavorites: readJsonStorageValue(FOLDER_FAVORITES_KEY, [])
+  });
+}
 
 function readLocalStorageSnapshot() {
   const values = {};
@@ -18,8 +37,11 @@ function readLocalStorageSnapshot() {
 }
 
 function persistLocalStorageSnapshot() {
+  if (isDetachedComposeRenderer) return { ok: true, skipped: true };
   try {
-    return ipcRenderer.sendSync('native:renderer-storage-save', readLocalStorageSnapshot());
+    const result = ipcRenderer.sendSync('native:renderer-storage-save', readLocalStorageSnapshot());
+    const favoriteResult = persistFavoriteState();
+    return result?.ok === false ? result : favoriteResult?.ok === false ? favoriteResult : result;
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }
@@ -31,7 +53,8 @@ function restoreLocalStorageSnapshot() {
   const snapshot = persistedRendererSnapshot;
   try {
     if (!snapshot?.found || !snapshot.values || typeof snapshot.values !== 'object') return { ok: true, restored: false, count: 0 };
-    localStorage.clear();
+    // Merge persisted values. Clearing here used to erase newer keys whenever an
+    // older or partial renderer snapshot won a race during startup.
     Object.entries(snapshot.values).forEach(([key, value]) => {
       if (typeof key === 'string' && typeof value === 'string') localStorage.setItem(key, value);
     });
@@ -44,17 +67,30 @@ function restoreLocalStorageSnapshot() {
 try {
   persistedRendererSnapshot = ipcRenderer.sendSync('native:renderer-storage-load') || persistedRendererSnapshot;
   if (!isDetachedComposeRenderer) restoreLocalStorageSnapshot();
+  if (!isDetachedComposeRenderer) {
+    const favoriteState = ipcRenderer.sendSync('native:favorite-state-load');
+    if (favoriteState?.found) {
+      localStorage.setItem(MAIL_FAVORITES_KEY, JSON.stringify(favoriteState.mailFavoriteKeys || {}));
+      localStorage.setItem(FOLDER_FAVORITES_KEY, JSON.stringify(favoriteState.folderFavorites || []));
+    } else {
+      persistFavoriteState();
+    }
+  }
 } catch {
   // A missing or unreadable snapshot must never prevent the renderer from starting.
 }
 
 let lastPersistedSnapshot = '';
 const persistIfChanged = () => {
+  if (isDetachedComposeRenderer) return;
   const values = readLocalStorageSnapshot();
   const serialized = JSON.stringify(values);
   if (serialized === lastPersistedSnapshot) return;
   const result = ipcRenderer.sendSync('native:renderer-storage-save', values);
-  if (result?.ok) lastPersistedSnapshot = serialized;
+  if (result?.ok) {
+    persistFavoriteState();
+    lastPersistedSnapshot = serialized;
+  }
 };
 
 contextBridge.exposeInMainWorld('uniqueMailWindow', {
@@ -139,8 +175,8 @@ ipcRenderer.on('native:before-app-close', () => {
 });
 
 try {
-  if (typeof globalThis.setInterval === 'function') globalThis.setInterval(persistIfChanged, 1000);
-  if (typeof window?.addEventListener === 'function') window.addEventListener('beforeunload', persistIfChanged);
+  if (!isDetachedComposeRenderer && typeof globalThis.setInterval === 'function') globalThis.setInterval(persistIfChanged, 1000);
+  if (!isDetachedComposeRenderer && typeof window?.addEventListener === 'function') window.addEventListener('beforeunload', persistIfChanged);
 } catch {
   // Explicit saves from React remain available even if lifecycle hooks are unavailable.
 }

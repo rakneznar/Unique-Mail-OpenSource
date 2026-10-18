@@ -1,7 +1,7 @@
 {
   "name": "unique-mail",
   "private": true,
-  "version": "0.5.69",
+  "version": "0.5.70",
   "description": "Local-first desktop mail client with IMAP/SMTP synchronization for Windows.",
   "author": "PACOPAR",
   "license": "Apache-2.0",
@@ -22,6 +22,7 @@
     "preview": "vite preview",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); require('fs').rmSync('server.js',{force:true})\"",
     "lint": "tsc --noEmit",
+    "test:favorites": "node scripts/test-favorite-state.cjs",
     "notices": "node scripts/generate-third-party-notices.cjs",
     "dist:portable": "npm run build && electron-builder --win portable",
     "dist:all": "npm run build && electron-builder --win nsis portable"

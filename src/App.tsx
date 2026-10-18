@@ -20,10 +20,9 @@ import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.69';
+const APP_VERSION = '0.5.70';
 const DEVELOPER_PASSWORD_SALT = 'unique-mail-wpf-suite-admin-v1';
 const DEVELOPER_PASSWORD_HASH = 'b85432d324dda9a402159fe262e0c3280cea9a522894a5710aaf60071253d111';
-(window as any).uniqueMailNative?.restoreRendererStorage?.();
 type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
 type SignatureFormat = 'text' | 'html';
@@ -113,11 +112,19 @@ const mailPinIdentityKeys = (mail: Email) => {
   const folder = String(mail.imapFolder || mail.folder || '').trim().replace(/\\/g, '/').toLowerCase();
   const uid = Number(mail.imapUid || 0);
   const uidValidity = String(mail.imapUidValidity || '').trim();
-  const fingerprint = [account, String(mail.senderEmail || '').trim().toLowerCase(), String(mail.subject || '').trim(), String(mail.date || '').trim()].join('|');
+  const messageId = String(mail.messageId || '').trim().replace(/^<|>$/g, '').toLowerCase();
+  const sender = String(mail.senderEmail || '').trim().toLowerCase();
+  const subject = String(mail.subject || '').trim();
+  const date = String(mail.date || '').trim();
+  const normalizedDate = Number.isNaN(Date.parse(date)) ? date.toLowerCase() : new Date(date).toISOString();
+  const fingerprint = [account, sender, subject.toLowerCase(), normalizedDate].join('|');
+  const legacyFingerprint = [account, sender, subject, date].join('|');
   return Array.from(new Set([
     mail.id ? `id:${mail.id}` : '',
+    messageId ? `message:${account}|${messageId}` : '',
     uid > 0 ? `imap:${account}|${folder}|${uidValidity}|${uid}` : '',
-    fingerprint !== '|||' ? `mail:${fingerprint}` : ''
+    fingerprint !== '|||' ? `mail:${fingerprint}` : '',
+    legacyFingerprint !== '|||' ? `mail:${legacyFingerprint}` : ''
   ].filter(Boolean)));
 };
 const DEFAULT_CALENDAR_SYNC_SETTINGS: CalendarSyncSettings = {
@@ -1241,6 +1248,7 @@ exit`;
           imapFolder: mail.imapFolder || mail.folder || '',
           imapUid: mail.imapUid,
           imapUidValidity: mail.imapUidValidity,
+          messageId: mail.messageId,
           senderEmail: mail.senderEmail,
           subject: mail.subject,
           date: mail.date,
@@ -1849,8 +1857,10 @@ exit`;
     ? { ...mail, isPinned: true }
     : mail;
   const applyPersistedFavorite = (mail: Email): Email => {
-    const saved = mailPinIdentityKeys(mail).map(key => favoriteMailKeysRef.current.get(key)).find(value => value !== undefined);
-    return saved === undefined ? mail : { ...mail, isFavorite: saved };
+    const savedValues = mailPinIdentityKeys(mail).map(key => favoriteMailKeysRef.current.get(key));
+    if (savedValues.includes(true)) return { ...mail, isFavorite: true };
+    if (savedValues.includes(false)) return { ...mail, isFavorite: false };
+    return mail;
   };
 
   useEffect(() => {
@@ -4476,7 +4486,6 @@ exit`;
     localStorage.setItem(FAVORITE_MAIL_KEYS_STORAGE_KEY, JSON.stringify(Object.fromEntries(favoriteMailKeysRef.current)));
     (window as any).uniqueMailNative?.persistRendererStorage?.();
     setEmails(prev => prev.map(e => e.id === id ? { ...e, isFavorite: nextFavorite } : e));
-    triggerPostActionSync('Favorit geändert', [target]);
   };
 
   const handleToggleSelectedPin = () => {

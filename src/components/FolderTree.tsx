@@ -179,9 +179,9 @@ export default function FolderTree({
     const reloadFavoriteFolders = () => {
       try {
         const saved = localStorage.getItem('uniquemail_folder_favorites');
-        setFavoriteFolderEntries(saved ? normalizeFavoriteFolders(JSON.parse(saved)) : []);
+        if (saved !== null) setFavoriteFolderEntries(normalizeFavoriteFolders(JSON.parse(saved)));
       } catch {
-        setFavoriteFolderEntries([]);
+        // Keep the last valid in-memory state; a transient read error must never erase favorites.
       }
     };
     window.addEventListener('uniquemail-folder-favorites-updated', reloadFavoriteFolders);
@@ -245,6 +245,7 @@ export default function FolderTree({
   };
 
   const normalizeFolderKey = (value?: string) => (value || 'inbox').trim().replace(/\\/g, '/').toLowerCase();
+  const favoriteFolderKey = (accountEmail: string, folderId: string) => `${accountEmail.trim().toLowerCase()}::${normalizeFolderKey(folderId)}`;
 
   const folderMatches = (mailFolderRaw: string | undefined, folderIdRaw: string) => {
     const mailFolder = normalizeFolderKey(mailFolderRaw);
@@ -309,10 +310,7 @@ export default function FolderTree({
     const normalizedFolder = normalizeFolderKey(folderId);
     return folderStats.unreadCounts.get(accountKey + '::' + normalizedFolder) || 0;
   };
-  const favoriteFolders = favoriteFolderEntries.filter(entry => {
-    const account = accounts.find(item => item.email.toLowerCase() === entry.accountEmail.toLowerCase());
-    return !account?.serverFolders?.length || account.serverFolders.some(folder => normalizeFolderKey(folder.path || folder.id) === normalizeFolderKey(entry.id));
-  }).map(entry => ({
+  const favoriteFolders = favoriteFolderEntries.map(entry => ({
     ...entry,
     icon: inferFolderIcon(entry.id),
     count: getFolderUnreadCount(entry.accountEmail, entry.id)
@@ -322,10 +320,10 @@ export default function FolderTree({
     const normalizedAccount = accountEmail.trim();
     const normalizedId = id.trim();
     if (!normalizedAccount || !normalizedId) return;
-    const key = `${normalizedAccount.toLowerCase()}::${normalizedId.toLowerCase()}`;
+    const key = favoriteFolderKey(normalizedAccount, normalizedId);
     setFavoriteFolderEntries(prev => {
-      if (prev.some(item => `${item.accountEmail.toLowerCase()}::${item.id.toLowerCase()}` === key)) {
-        return prev.filter(item => `${item.accountEmail.toLowerCase()}::${item.id.toLowerCase()}` !== key);
+      if (prev.some(item => favoriteFolderKey(item.accountEmail, item.id) === key)) {
+        return prev.filter(item => favoriteFolderKey(item.accountEmail, item.id) !== key);
       }
       return [...prev, { accountEmail: normalizedAccount, id: normalizedId, label: label.trim() || normalizedId }];
     });
@@ -810,7 +808,7 @@ export default function FolderTree({
                   {folders.map((folder) => {
                     const FolderIcon = folder.icon;
                     const isSelected = selectedFolder === folder.id && activeAccountEmail.toLowerCase() === account.email.toLowerCase();
-                    const isFavorite = favoriteFolderEntries.some(item => item.accountEmail === account.email && item.id === folder.id);
+                    const isFavorite = favoriteFolderEntries.some(item => favoriteFolderKey(item.accountEmail, item.id) === favoriteFolderKey(account.email, folder.id));
                     const hasChildren = hasFolderChildren(folders, folder);
                     const folderCollapsed = !!collapsedFolders[folderNodeKey(account.email, folder.id)];
                     if (isHiddenByCollapsedParent(account.email, folders, folder)) return null;

@@ -40,6 +40,7 @@ export interface Email {
   imapUid?: number;
   imapFolder?: string;
   imapUidValidity?: string;
+  messageId?: string;
 
   // Follow-up Wiedervorlage inputs
   reminderDate?: string;      // ISO format or empty

@@ -436,6 +436,7 @@ function updateEnvelopeFields(existing: any, message: any, folderPath: string, e
     imapUid: Number(message.uid),
     imapFolder: folderPath,
     imapUidValidity: uidValidity,
+    messageId: message.envelope?.messageId || existing.messageId,
   };
 }
 
@@ -466,6 +467,7 @@ function buildEmailFromEnvelope(message: any, folderPath: string, email: string,
     imapUid: uid,
     imapFolder: folderPath,
     imapUidValidity: uidValidity,
+    messageId: message.envelope?.messageId || "",
   };
 }
 
@@ -526,6 +528,7 @@ async function buildEmailFromSource(message: any, folderPath: string, email: str
     imapUid: uid,
     imapFolder: folderPath,
     imapUidValidity: uidValidity,
+    messageId: parsed.messageId || message.envelope?.messageId || "",
   };
 }
 
