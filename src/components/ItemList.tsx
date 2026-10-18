@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, Category, MailFilter, MailSearchScope, MailSort } from '../types';
 import { addEmailsToDragData } from '../utils/eml';
+import { useI18n } from '../i18n';
 
 export type MailDateGroup = 'today' | 'yesterday' | 'dayBeforeYesterday' | 'lastWeek' | 'twoWeeksAgo' | 'older';
 
@@ -122,7 +123,6 @@ interface ItemListProps {
   setMailSort: (sort: MailSort) => void;
   onSearchFocus?: () => void;
   isDense?: boolean;
-  language?: 'de' | 'en';
   dateDisplayFormat?: string;
   
   // Account/Folder integration
@@ -177,7 +177,6 @@ export default function ItemList({
   setMailSort,
   onSearchFocus,
   isDense = false,
-  language = 'de',
   dateDisplayFormat = 'dd.MM.yyyy',
   activeAccountEmail,
   selectedFolder,
@@ -204,6 +203,7 @@ export default function ItemList({
   onNewContact,
   mailActionBarColor = '#ffffff'
 }: ItemListProps) {
+  const { t, formatLocale } = useI18n();
   const [contextMenu, setContextMenu] = React.useState<{ x: number; y: number; emailId: string } | null>(null);
   const [newContactGroupLabel, setNewContactGroupLabel] = React.useState('');
   const [showFilterMenu, setShowFilterMenu] = React.useState(false);
@@ -288,7 +288,7 @@ export default function ItemList({
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
     if (Number.isNaN(d.getTime())) return '';
-    const locale = language === 'en' ? 'en-US' : 'de-DE';
+    const locale = formatLocale;
     const pad = (value: number) => String(value).padStart(2, '0');
     const replacements: Record<string, string> = {
       yyyy: String(d.getFullYear()),
@@ -305,24 +305,24 @@ export default function ItemList({
   };
 
   const uiText = {
-    searchMail: language === 'en' ? 'Search e-mails...' : 'E-Mails suchen...',
-    searchCalendar: language === 'en' ? 'Search appointments...' : 'Termine suchen...',
-    searchContacts: language === 'en' ? 'Search contacts...' : 'Kontakte suchen...',
-    searchTasks: language === 'en' ? 'Search tasks...' : 'Aufgaben suchen...',
-    searchGeneric: language === 'en' ? 'Search...' : 'Suchen...',
-    all: language === 'en' ? 'All' : 'Alle',
-    active: language === 'en' ? 'Active' : 'Aktiv',
-    unread: language === 'en' ? 'Unread' : 'Ungelesen',
-    favorites: language === 'en' ? 'Favorites' : 'Favoriten',
-    attachments: language === 'en' ? 'Attachments' : 'Mit Anlagen',
-    pinned: language === 'en' ? 'Pinned' : 'Angepinnt',
+    searchMail: t('mail.search'),
+    searchCalendar: t('calendar.search'),
+    searchContacts: t('contacts.search'),
+    searchTasks: t('tasks.search'),
+    searchGeneric: t('common.search'),
+    all: t('common.all'),
+    active: t('common.active'),
+    unread: t('mail.unread'),
+    favorites: t('mail.favorites'),
+    attachments: t('mail.attachments'),
+    pinned: t('mail.pinned'),
     dateGroups: {
-      today: language === 'en' ? 'Today' : 'Heute',
-      yesterday: language === 'en' ? 'Yesterday' : 'Gestern',
-      dayBeforeYesterday: language === 'en' ? 'Day before yesterday' : 'Vorgestern',
-      lastWeek: language === 'en' ? 'Last week' : 'Letzte Woche',
-      twoWeeksAgo: language === 'en' ? 'Two weeks ago' : 'Vor zwei Wochen',
-      older: language === 'en' ? 'Older' : 'Älter'
+      today: t('date.today'),
+      yesterday: t('date.yesterday'),
+      dayBeforeYesterday: t('date.dayBeforeYesterday'),
+      lastWeek: t('date.lastWeek'),
+      twoWeeksAgo: t('date.twoWeeksAgo'),
+      older: t('date.older')
     } as Record<MailDateGroup, string>
   };
 
@@ -411,7 +411,7 @@ export default function ItemList({
                   ? 'text-[#0078d4] bg-[#0078d4]/10 dark:bg-[#0078d4]/20 font-extrabold shadow-sm'
                   : 'text-slate-500 hover:text-[#0078d4] dark:text-slate-400 dark:hover:text-blue-400 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
               }`}
-              title={language === 'en' ? 'Show only e-mails with attachments' : 'Nur E-Mails mit Anlagen anzeigen'}
+              title={t('mail.onlyAttachments')}
             >
               <Paperclip className="h-3 w-3 shrink-0" />
               <span>{uiText.attachments}</span>
@@ -439,38 +439,38 @@ export default function ItemList({
             type="button"
             onClick={() => setShowFilterMenu(previous => !previous)}
             className={`flex h-7 w-8 items-center justify-center rounded-md border transition-colors ${showFilterMenu || mailSearchScope !== 'folder' || mailFilter !== 'all' || mailSort !== 'date-desc' ? 'border-[#0078d4] bg-[#0078d4]/10 text-[#0078d4]' : 'border-slate-250 bg-white text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}
-            title="Filter- und Sortieroptionen"
-            aria-label="Filter- und Sortieroptionen"
+            title={t('mail.filterAndSort')}
+            aria-label={t('mail.filterAndSort')}
             aria-expanded={showFilterMenu}
           >
             <ListFilter className="h-4 w-4" />
           </button>
           {showFilterMenu && (
             <div className="absolute right-0 top-8 z-[120] w-64 rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-2xl dark:border-slate-700 dark:bg-[#111a2d] dark:text-slate-100">
-              <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">Suchbereich</div>
+              <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">{t('mail.searchScope')}</div>
               {([
-                ['folder', 'Aktueller Ordner'],
-                ['mailbox', 'Alle Ordner dieses Kontos'],
-                ['all-mailboxes', 'Alle Postfächer']
+                ['folder', t('ribbon.currentFolder')],
+                ['mailbox', t('ribbon.allAccountFolders')],
+                ['all-mailboxes', t('ribbon.allMailboxes')]
               ] as Array<[MailSearchScope, string]>).map(([scope, label]) => (
                 <button key={scope} type="button" onClick={() => { setMailSearchScope(scope); setShowFilterMenu(false); }} className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">
                   <span>{label}</span>{mailSearchScope === scope && <CheckCircle2 className="h-3.5 w-3.5 text-[#0078d4]" />}
                 </button>
               ))}
               <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
-              <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">Filtern</div>
+              <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">{t('ribbon.filter')}</div>
               {([
-                ['all', 'Alle Nachrichten'], ['unread', 'Ungelesen'], ['attachments', 'Mit Anlagen'], ['favorites', 'Favoriten'],
-                ['pinned', 'Angepinnt'], ['flagged', 'Markiert'], ['important', 'Hohe Priorität']
+                ['all', t('mail.filterAll')], ['unread', t('mail.unread')], ['attachments', t('mail.attachments')], ['favorites', t('mail.favorites')],
+                ['pinned', t('mail.pinned')], ['flagged', t('mail.flagged')], ['important', t('mail.highPriority')]
               ] as Array<[MailFilter, string]>).map(([filter, label]) => (
                 <button key={filter} type="button" onClick={() => { setMailFilter(filter); setShowFilterMenu(false); }} className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">
                   <span>{label}</span>{mailFilter === filter && <CheckCircle2 className="h-3.5 w-3.5 text-[#0078d4]" />}
                 </button>
               ))}
               <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
-              <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">Sortieren</div>
+              <div className="px-2 pb-1 text-[9px] font-black uppercase tracking-wider text-slate-400">{t('ribbon.sort')}</div>
               {([
-                ['date-desc', 'Neueste zuerst'], ['date-asc', 'Älteste zuerst'], ['sender', 'Absender A-Z'], ['subject', 'Betreff A-Z']
+                ['date-desc', t('mail.newestFirst')], ['date-asc', t('mail.oldestFirst')], ['sender', t('mail.senderAz')], ['subject', t('mail.subjectAz')]
               ] as Array<[MailSort, string]>).map(([sort, label]) => (
                 <button key={sort} type="button" onClick={() => { setMailSort(sort); setShowFilterMenu(false); }} className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">
                   <span>{label}</span>{mailSort === sort && <CheckCircle2 className="h-3.5 w-3.5 text-[#0078d4]" />}
@@ -594,7 +594,7 @@ export default function ItemList({
               groupedRows.push({
                 type: 'group',
                 key: `group-${group}`,
-                label: group === 'pinned' ? uiText.pinned : group === 'sorted' ? (language === 'en' ? 'Search results' : 'Suchergebnisse') : uiText.dateGroups[group],
+                label: group === 'pinned' ? uiText.pinned : group === 'sorted' ? t('mail.searchResults') : uiText.dateGroups[group],
                 height: groupRowHeight
               });
               previousGroup = group;

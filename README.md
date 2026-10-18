@@ -11,6 +11,10 @@ npm install
 npm run dev
 ```
 
+## Localization
+
+English is the canonical source language and the runtime fallback for every locale. Translation catalogs live in `src/i18n/locales`, are validated during every build, and ship with each application update. See [LOCALIZATION.md](LOCALIZATION.md) for the continuous-localization workflow.
+
 Type-check and build:
 
 ```powershell

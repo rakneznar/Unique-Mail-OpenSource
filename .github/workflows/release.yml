@@ -29,6 +29,9 @@ jobs:
       - name: Type check
         run: npm run lint
 
+      - name: Validate language catalogs
+        run: npm run test:i18n
+
       - name: Build Windows installer
         run: npm run dist:win
 

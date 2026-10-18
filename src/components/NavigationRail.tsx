@@ -5,21 +5,21 @@
 
 import React from 'react';
 import { Mail, Calendar, Users, SquareCheck, StickyNote } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 interface NavigationRailProps {
   currentPage: 'mail' | 'calendar' | 'contacts' | 'crm' | 'tasks' | 'notes' | 'dev';
   setCurrentPage: (page: 'mail' | 'calendar' | 'contacts' | 'crm' | 'tasks' | 'notes' | 'dev') => void;
-  language?: 'de' | 'en';
 }
 
-export default function NavigationRail({ currentPage, setCurrentPage, language = 'de' }: NavigationRailProps) {
-  const isEnglish = language === 'en';
+export default function NavigationRail({ currentPage, setCurrentPage }: NavigationRailProps) {
+  const { t } = useI18n();
   const items = [
-    { id: 'mail', label: isEnglish ? 'Mail' : 'E-Mail', icon: Mail, color: 'text-blue-600 hover:text-blue-800' },
-    { id: 'calendar', label: isEnglish ? 'Calendar' : 'Kalender', icon: Calendar, color: 'text-green-600 hover:text-green-800' },
-    { id: 'crm', label: 'CRM', icon: Users, color: 'text-teal-600 hover:text-teal-800' },
-    { id: 'tasks', label: isEnglish ? 'Tasks' : 'Aufgaben', icon: SquareCheck, color: 'text-amber-600 hover:text-amber-800' },
-    { id: 'notes', label: isEnglish ? 'Notes' : 'Notizen', icon: StickyNote, color: 'text-yellow-600 hover:text-yellow-750' },
+    { id: 'mail', label: t('nav.mail'), icon: Mail, color: 'text-blue-600 hover:text-blue-800' },
+    { id: 'calendar', label: t('app.calendar'), icon: Calendar, color: 'text-green-600 hover:text-green-800' },
+    { id: 'crm', label: t('app.crm'), icon: Users, color: 'text-teal-600 hover:text-teal-800' },
+    { id: 'tasks', label: t('app.tasks'), icon: SquareCheck, color: 'text-amber-600 hover:text-amber-800' },
+    { id: 'notes', label: t('app.notes'), icon: StickyNote, color: 'text-yellow-600 hover:text-yellow-750' },
   ] as const;
 
   return (
@@ -54,7 +54,7 @@ export default function NavigationRail({ currentPage, setCurrentPage, language =
               
               {/* Tooltip on Hover */}
               <div className="hidden group-hover:block absolute left-15 bg-slate-900 border border-slate-800 text-white text-[10.5px] py-1 px-2.5 rounded-lg shadow-xl whitespace-nowrap z-50 animate-fade-in font-medium">
-                {item.label} {isEnglish ? 'open' : 'öffnen'}
+                {t('nav.open', { name: item.label })}
               </div>
             </button>
           );

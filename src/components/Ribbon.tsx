@@ -7,6 +7,7 @@ import React from 'react';
 import AppLogo from './AppLogo';
 import { Category } from '../types';
 import { MailFilter, MailSearchScope, MailSort } from '../types';
+import { useI18n } from '../i18n';
 import { 
   Mail, MailOpen, Trash2, Archive, Reply, ReplyAll, Forward, Search, 
   RefreshCw, Wifi, WifiOff, FolderPlus, FolderOpen, 
@@ -43,7 +44,6 @@ interface RibbonProps {
   onOpenOptions: () => void;
   isSyncing?: boolean;
   isDarkMode?: boolean;
-  language?: 'de' | 'en';
   onToggleDarkMode?: () => void;
   
   onArchiveMail?: () => void;
@@ -99,7 +99,6 @@ export default function Ribbon({
   onOpenOptions,
   isSyncing = false,
   isDarkMode = false,
-  language = 'de',
   onToggleDarkMode,
   onArchiveMail,
   onReportPhishing,
@@ -124,45 +123,20 @@ export default function Ribbon({
   mailSort,
   setMailSort
 }: RibbonProps) {
+  const { t } = useI18n();
   const [showCategoryDropdown, setShowCategoryDropdown] = React.useState(false);
   const buttonRef = React.useRef<HTMLButtonElement>(null);
   const [dropdownPosition, setDropdownPosition] = React.useState({ top: 0, left: 0 });
   const ribbonText = {
-    inbox: language === 'en' ? 'Inbox' : 'Posteingang',
-    calendar: language === 'en' ? 'Calendar' : 'Kalender',
-    contacts: language === 'en' ? 'Contacts' : 'Kontakte',
-    tasks: language === 'en' ? 'Tasks' : 'Aufgabenliste',
-    notes: language === 'en' ? 'Notes' : 'Notizen',
-    developer: language === 'en' ? 'Developer module' : 'Entwicklermodul',
-    start: language === 'en' ? 'Home' : 'Start',
-    sendReceive: language === 'en' ? 'Send / Receive' : 'Senden / Empfangen',
-    folders: language === 'en' ? 'Folders' : 'Ordner',
-    view: language === 'en' ? 'View' : 'Ansicht',
-    newEmail: language === 'en' ? 'New E-Mail' : 'Neue E-Mail',
-    resend: language === 'en' ? 'Resend' : 'Erneut senden',
-    newGroup: language === 'en' ? 'New' : 'Neu',
-    pin: language === 'en' ? 'Pin' : 'Anpinnen',
-    readUnread: language === 'en' ? 'Read/Unread' : 'Gelesen/Ungelesen',
-    favorite: language === 'en' ? 'Favorite' : 'Favorit',
-    delete: language === 'en' ? 'Delete' : 'Löschen',
-    blockSender: language === 'en' ? 'Block sender' : 'Absender sperren',
-    printPdf: language === 'en' ? 'Print / PDF' : 'Drucken / PDF',
-    message: language === 'en' ? 'Message' : 'Nachricht',
-    archive: language === 'en' ? 'Archive' : 'Archivieren',
-    emptyTrash: language === 'en' ? 'Empty trash' : 'Papierkorb leeren',
-    report: language === 'en' ? 'Report' : 'Melden',
-    cleanup: language === 'en' ? 'Clean up' : 'Aufräumen',
-    reply: language === 'en' ? 'Reply' : 'Antworten',
-    replyAll: language === 'en' ? 'Reply all' : 'Allen antworten',
-    forward: language === 'en' ? 'Forward' : 'Weiterleiten',
-    replies: language === 'en' ? 'Replies' : 'Antworten',
-    quickSteps: language === 'en' ? 'QuickSteps' : 'QuickSteps',
-    categories: language === 'en' ? 'Categories' : 'Kategorien',
-    followUp: language === 'en' ? 'Follow up' : 'Verfolgung',
-    tags: language === 'en' ? 'Tags' : 'Tags',
-    search: language === 'en' ? 'Search' : 'Suchen',
-    addressBook: language === 'en' ? 'Address book' : 'Adressbuch',
-    manage: language === 'en' ? 'Manage...' : 'Verwalten...'
+    inbox: t('app.inbox'), calendar: t('app.calendar'), contacts: t('app.contacts'), tasks: t('app.tasks'),
+    notes: t('app.notes'), developer: t('app.developer'), start: t('ribbon.home'), sendReceive: t('ribbon.sendReceive'),
+    folders: t('ribbon.folders'), view: t('ribbon.view'), newEmail: t('ribbon.newEmail'), resend: t('ribbon.resend'),
+    newGroup: t('ribbon.new'), pin: t('ribbon.pin'), readUnread: t('ribbon.readUnread'), favorite: t('ribbon.favorite'),
+    delete: t('ribbon.delete'), blockSender: t('ribbon.blockSender'), printPdf: t('ribbon.printPdf'), message: t('ribbon.message'),
+    archive: t('ribbon.archive'), emptyTrash: t('ribbon.emptyTrash'), report: t('ribbon.report'), cleanup: t('ribbon.cleanup'),
+    reply: t('ribbon.reply'), replyAll: t('ribbon.replyAll'), forward: t('ribbon.forward'), replies: t('ribbon.replies'),
+    quickSteps: t('ribbon.quickSteps'), categories: t('ribbon.categories'), followUp: t('ribbon.followUp'), tags: t('ribbon.tags'),
+    search: t('ribbon.search'), addressBook: t('ribbon.addressBook'), manage: t('ribbon.manage')
   };
   const quickIconButtonClass = "group relative p-2 rounded-lg text-[#4f4f4f] transition-all duration-150 ease-out cursor-pointer hover:-translate-y-0.5 hover:bg-white hover:text-[#0078d4] hover:shadow-sm active:translate-y-0 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0078d4]/30";
   const quickIconClass = "w-3.5 h-3.5 transition-transform duration-150 ease-out group-hover:scale-110 group-hover:-rotate-6";
@@ -193,21 +167,21 @@ export default function Ribbon({
           <button 
             onClick={onTriggerSync} 
             className={quickIconButtonClass} 
-            title="Senden/Empfangen für alle Ordner ausführen"
+            title={t('ribbon.syncAllFolders')}
           >
             <RefreshCw className={`${quickIconClass} ${isSyncing ? 'animate-spin text-[#0078d4]' : ''}`} />
           </button>
           <button 
             onClick={onNewEmail} 
             className={quickIconButtonClass} 
-            title="Neue E-Mail verfassen"
+            title={t('ribbon.compose')}
           >
             <Mail className={quickIconClass} />
           </button>
           <button 
             onClick={onOpenOptions}
             className={quickIconButtonClass}
-            title="Konteneinstellungen öffnen"
+            title={t('ribbon.openSettings')}
           >
             <Settings className={quickIconClass} />
           </button>
@@ -215,7 +189,7 @@ export default function Ribbon({
           <button 
             onClick={onToggleDarkMode}
             className={`${quickIconButtonClass} flex items-center justify-center`}
-            title={isDarkMode ? "Lichtmodus einschalten" : "Dunkelmodus einschalten"}
+            title={isDarkMode ? t('ribbon.enableLightMode') : t('ribbon.enableDarkMode')}
           >
             {isDarkMode ? (
               <Sun className={`${quickIconClass} text-amber-500 animate-pulse`} />
@@ -227,13 +201,13 @@ export default function Ribbon({
         
         {/* Current Active Window Caption */}
         <div className="font-bold text-slate-550 text-[11.5px] absolute left-1/2 transform -translate-x-1/2 hidden xl:block tracking-wide uppercase">
-          {currentPage === 'mail' && `Posteingang`}
-          {currentPage === 'calendar' && `Kalender`}
-          {currentPage === 'contacts' && `Kontakte`}
-          {currentPage === 'crm' && `CRM`}
-          {currentPage === 'tasks' && `Aufgabenliste`}
-          {currentPage === 'notes' && `Notizen`}
-          {currentPage === 'dev' && `Entwicklermodul`}
+          {currentPage === 'mail' && ribbonText.inbox}
+          {currentPage === 'calendar' && ribbonText.calendar}
+          {currentPage === 'contacts' && ribbonText.contacts}
+          {currentPage === 'crm' && t('app.crm')}
+          {currentPage === 'tasks' && ribbonText.tasks}
+          {currentPage === 'notes' && ribbonText.notes}
+          {currentPage === 'dev' && ribbonText.developer}
         </div>
 
         <div data-window-no-drag className="w-8" />
@@ -250,7 +224,7 @@ export default function Ribbon({
                 : 'hover:bg-slate-200/50 text-slate-500 hover:text-slate-900'
             }`}
           >
-            Start
+            {ribbonText.start}
           </button>
           
           <button 
@@ -261,7 +235,7 @@ export default function Ribbon({
                 : 'hover:bg-slate-200/50 text-slate-500 hover:text-slate-900'
             }`}
           >
-            Senden / Empfangen
+            {ribbonText.sendReceive}
           </button>
           
           <button 
@@ -272,7 +246,7 @@ export default function Ribbon({
                 : 'hover:bg-slate-200/50 text-slate-500 hover:text-slate-900'
             }`}
           >
-            Ordner
+            {ribbonText.folders}
           </button>
           
           <button 
@@ -283,7 +257,7 @@ export default function Ribbon({
                 : 'hover:bg-slate-200/50 text-slate-500 hover:text-slate-900'
             }`}
           >
-            Ansicht
+            {ribbonText.view}
           </button>
 
           <button
@@ -295,7 +269,7 @@ export default function Ribbon({
                 : 'hover:bg-slate-200/50 text-slate-500 hover:text-slate-900'
             }`}
           >
-            Suchoptionen
+            {t('ribbon.searchOptions')}
           </button>
         </div>
       </div>
@@ -859,9 +833,9 @@ export default function Ribbon({
             <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
               <div className="flex items-center gap-1.5">
                 {([
-                  ['folder', 'Aktueller Ordner'],
-                  ['mailbox', 'Alle Ordner dieses Kontos'],
-                  ['all-mailboxes', 'Alle Postfächer']
+                  ['folder', t('ribbon.currentFolder')],
+                  ['mailbox', t('ribbon.allAccountFolders')],
+                  ['all-mailboxes', t('ribbon.allMailboxes')]
                 ] as Array<[MailSearchScope, string]>).map(([scope, label]) => (
                   <button
                     key={scope}
@@ -874,19 +848,19 @@ export default function Ribbon({
                   </button>
                 ))}
               </div>
-              <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">Suchbereich</div>
+              <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">{t('mail.searchScope')}</div>
             </div>
 
             <div className="flex flex-col items-center justify-between pr-4 mr-4 border-r border-slate-100">
               <div className="grid grid-cols-4 gap-1">
                 {([
-                  ['all', 'Alle', ListFilter],
-                  ['unread', 'Ungelesen', MailOpen],
-                  ['attachments', 'Anlagen', Paperclip],
-                  ['favorites', 'Favoriten', Star],
-                  ['pinned', 'Angepinnt', Pin],
-                  ['flagged', 'Markiert', Flag],
-                  ['important', 'Wichtig', ShieldAlert]
+                  ['all', t('common.all'), ListFilter],
+                  ['unread', t('mail.unread'), MailOpen],
+                  ['attachments', t('mail.attachments'), Paperclip],
+                  ['favorites', t('mail.favorites'), Star],
+                  ['pinned', t('mail.pinned'), Pin],
+                  ['flagged', t('mail.flagged'), Flag],
+                  ['important', t('mail.important'), ShieldAlert]
                 ] as Array<[MailFilter, string, React.ComponentType<{ className?: string }>]>).map(([filter, label, Icon]) => (
                   <button
                     key={filter}
@@ -899,16 +873,16 @@ export default function Ribbon({
                   </button>
                 ))}
               </div>
-              <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">Filtern</div>
+              <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">{t('ribbon.filter')}</div>
             </div>
 
             <div className="flex flex-col items-center justify-between">
               <div className="grid grid-cols-2 gap-1">
                 {([
-                  ['date-desc', 'Neueste', CalendarArrowDown],
-                  ['date-asc', 'Älteste', CalendarArrowUp],
-                  ['sender', 'Absender', ArrowDownAZ],
-                  ['subject', 'Betreff', ArrowDownAZ]
+                  ['date-desc', t('ribbon.newest'), CalendarArrowDown],
+                  ['date-asc', t('ribbon.oldest'), CalendarArrowUp],
+                  ['sender', t('ribbon.sender'), ArrowDownAZ],
+                  ['subject', t('ribbon.subject'), ArrowDownAZ]
                 ] as Array<[MailSort, string, React.ComponentType<{ className?: string }>]>).map(([sort, label, Icon]) => (
                   <button
                     key={sort}
@@ -921,7 +895,7 @@ export default function Ribbon({
                   </button>
                 ))}
               </div>
-              <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">Sortieren</div>
+              <div className="text-[8.5px] text-slate-400 font-extrabold uppercase tracking-widest">{t('ribbon.sort')}</div>
             </div>
           </div>
         )}

@@ -18,12 +18,12 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, 
 import AppLogo from './components/AppLogo';
 import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
+import { LANGUAGE_CATALOG_VERSION, useI18n } from './i18n';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.70';
+const APP_VERSION = '0.5.71';
 const DEVELOPER_PASSWORD_SALT = 'unique-mail-wpf-suite-admin-v1';
 const DEVELOPER_PASSWORD_HASH = 'b85432d324dda9a402159fe262e0c3280cea9a522894a5710aaf60071253d111';
-type UiLanguage = 'de' | 'en';
 type FeedbackKind = 'bug' | 'feature';
 type SignatureFormat = 'text' | 'html';
 type AppLockConfig = { enabled: boolean; salt: string; hash: string; updatedAt?: string };
@@ -255,6 +255,7 @@ const MAIL_DATE_FORMAT_OPTIONS = [
 ];
 
 export default function App() {
+  const { locale: uiLanguage, setLocale: setUiLanguage, locales: availableLocales, t, formatLocale } = useI18n();
   // Page switching & Ribbon active tab - defaulted to mail inbox per security directives
   const [currentPage, setCurrentPage] = useState<AppPage>('mail');
   const [activeTab, setActiveTab] = useState<'start' | 'sync' | 'folder' | 'view' | 'search' | 'dev' | 'options'>('start');
@@ -1010,7 +1011,6 @@ exit`;
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState<boolean>(false);
   const [optionsActiveTab, setOptionsActiveTab] = useState<'general' | 'appearance' | 'language' | 'accounts' | 'calendar' | 'security' | 'images' | 'ai' | 'help' | 'vacation' | 'signature'>('general');
   const [autoMarkAsReadOnOpen, setAutoMarkAsReadOnOpen] = useState<boolean>(() => localStorage.getItem('uniquemail_auto_mark_read_on_open') !== 'false');
-  const [uiLanguage, setUiLanguage] = useState<UiLanguage>(() => localStorage.getItem('uniquemail_ui_language') === 'en' ? 'en' : 'de');
   const [mailDateFormat, setMailDateFormat] = useState<string>(() => localStorage.getItem('uniquemail_mail_date_format') || DEFAULT_MAIL_DATE_FORMAT);
   const [attachmentDownloadDirectory, setAttachmentDownloadDirectory] = useState<string>(() => localStorage.getItem('uniquemail_attachment_download_directory') || '');
   const [recipientHistory, setRecipientHistory] = useState<KnownRecipient[]>(() => sanitizeRecipientHistory(readJsonStorage(RECIPIENT_HISTORY_STORAGE_KEY, [])));
@@ -3541,7 +3541,7 @@ exit`;
       to: sourceMail.recipientEmail || '',
       cc: sourceMail.ccEmail || '',
       bcc: sourceMail.bccEmail || '',
-      date: new Date(sourceMail.date).toLocaleString(uiLanguage === 'en' ? 'en-US' : 'de-DE'),
+      date: new Date(sourceMail.date).toLocaleString(formatLocale),
       bodyHtml: sanitizePrintableMailHtml(sourceMail.body || sourceMail.preview || ''),
       attachments: (sourceMail.attachments || sourceMail.draftAttachments || []).map(attachment => attachment.filename)
     });
@@ -5150,7 +5150,7 @@ exit`;
                         : 'text-slate-600 hover:bg-slate-200/60'
                     }`}
                   >
-                    Sprache / Language
+                    {t('settings.languageTab')}
                   </button>
                   <button 
                     onClick={() => setOptionsActiveTab('accounts')}
@@ -5364,22 +5364,23 @@ exit`;
                   <div className="space-y-5 animate-fade-in">
                     <div className="space-y-3">
                       <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest pb-1 border-b border-slate-100">
-                        Sprache und Datumsformat
+                        {t('settings.languageAndDate')}
                       </h3>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
                         <label className="block">
-                          <span className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5">Oberflächensprache</span>
+                          <span className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5">{t('settings.interfaceLanguage')}</span>
                           <select
                             value={uiLanguage}
-                            onChange={(e) => setUiLanguage(e.target.value === 'en' ? 'en' : 'de')}
+                            onChange={(e) => setUiLanguage(e.target.value)}
                             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-[#0078d4]"
                           >
-                            <option value="de">Deutsch</option>
-                            <option value="en">English</option>
+                            {availableLocales.map(locale => (
+                              <option key={locale.code} value={locale.code}>{locale.nativeName} ({locale.englishName})</option>
+                            ))}
                           </select>
                         </label>
                         <label className="block">
-                          <span className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5">Datumsformat in der Nachrichtenliste</span>
+                          <span className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5">{t('settings.dateFormat')}</span>
                           <select
                             value={mailDateFormat}
                             onChange={(e) => setMailDateFormat(e.target.value)}
@@ -5391,27 +5392,26 @@ exit`;
                           </select>
                         </label>
                         <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                          <span className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Download-Ziel für Anhänge</span>
+                          <span className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">{t('settings.attachmentDestination')}</span>
                           <div className="flex items-center gap-2">
                             <input
                               value={attachmentDownloadDirectory}
                               onChange={(e) => setAttachmentDownloadDirectory(e.target.value)}
-                              placeholder="Standard: Windows Downloads"
+                              placeholder={t('settings.defaultDownloads')}
                               className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 outline-none focus:border-[#0078d4]"
                             />
                             <button type="button" onClick={handleChooseAttachmentDownloadDirectory} className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-[10px] font-extrabold hover:bg-slate-100">
-                              Ordner wählen
+                              {t('settings.chooseFolder')}
                             </button>
                             <button type="button" onClick={() => setAttachmentDownloadDirectory('')} className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-[10px] font-extrabold text-slate-500 hover:bg-slate-50">
-                              Standard
+                              {t('settings.default')}
                             </button>
                           </div>
                         </div>
 
                         <div className="rounded-lg border border-sky-100 bg-white p-3 text-[11px] text-slate-600 leading-5">
-                          {isEnglish
-                            ? 'The main mail shell, navigation, ribbon and message-list labels switch to English. Message dates always include the year and follow this selected format.'
-                            : 'Die Hauptnavigation, das Ribbon und die Nachrichtenliste wechseln auf Englisch. Mail-Daten enthalten immer das Jahr und folgen diesem ausgewählten Format.'}
+                          <p>{t('settings.localizationDescription')}</p>
+                          <p className="mt-1 font-mono text-[9.5px] text-slate-400">{t('settings.catalogVersion', { version: LANGUAGE_CATALOG_VERSION })}</p>
                         </div>
                       </div>
                     </div>
