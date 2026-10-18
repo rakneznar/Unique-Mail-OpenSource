@@ -861,11 +861,11 @@ textarea:not(:disabled):not([readonly]),
   color: #d1fae5 !important;
 }
 
-/* Mail HTML is an external document. Keep its canvas light so authored colors remain readable. */
+/* The isolated document applies its own color-preserving dark transformation. */
 .dark #mail-reading-pane .rich-email-frame {
-  background-color: #ffffff !important;
-  border-color: #3b4a63 !important;
-  color-scheme: light !important;
+  background-color: #17191b !important;
+  border-color: #3b4045 !important;
+  color-scheme: dark !important;
 }
 
 .dark #folder-context-menu,
@@ -1008,3 +1008,26 @@ textarea:not(:disabled):not([readonly]),
   color: #9ad6f4 !important;
 }
 .dark #outlook-statusbar { background-color: #28313a !important; border-color: #41505a !important; color: #c0cbd4 !important; }
+
+/* Neutral, low-glare workspace palette. Keep depth between navigation, list and reading surfaces. */
+.dark body,
+.dark #outlook-app-frame { background-color: #121416 !important; }
+.dark #outlook-ribbon,
+.dark #outlook-ribbon > div { background-color: #181b1e !important; border-color: #30353a !important; }
+.dark #navigation-rail { background-color: #141719 !important; border-color: #30353a !important; }
+.dark #folder-tree-sidebar { background-color: #191c1f !important; border-color: #343a40 !important; }
+.dark #item-list-container,
+.dark #item-list-container .bg-slate-50\/50,
+.dark #item-list-container .bg-slate-50,
+.dark #item-list-container .h-12,
+.dark #item-list-container .h-10 { background-color: #1c2023 !important; border-color: #363c42 !important; }
+.dark #item-list-container [id^="email-item-"] { background-color: #23272b !important; border-color: #3a4147 !important; }
+.dark #item-list-container [id^="email-item-"]:hover { background-color: #2b3035 !important; border-color: #5799bd !important; }
+.dark #item-list-container [id^="email-item-"].border-\[\#0078d4\],
+.dark #item-list-container [id^="email-item-"][class*="border-[#0078d4]"] { background-color: #253a46 !important; border-color: #63b3dc !important; }
+.dark #mail-reading-pane { background-color: #181b1e !important; }
+.dark #mail-reading-pane > .p-6,
+.dark #mail-reading-pane .bg-slate-50\/25,
+.dark #mail-reading-pane .bg-\[\#fbfbfb\] { background-color: #1d2124 !important; border-color: #383f45 !important; }
+.dark #mail-message-scroll { background-color: #171a1d !important; }
+.dark #outlook-statusbar { background-color: #171a1d !important; border-color: #343a40 !important; color: #aeb7bf !important; }

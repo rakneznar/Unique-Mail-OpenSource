@@ -378,10 +378,16 @@ export default function ReadingPane({
     ? sanitizeMailHtml(rawEmailBodyForDisplay)
     : rawEmailBodyForDisplay, [rawEmailBodyForDisplay, rawEmailBodyLooksHtml]);
   const mailBodyFrameDocument = React.useMemo(() => {
+    const frameTheme = isDarkMode ? `
+html{background:#17191b;color-scheme:dark}
+body{background:#eef1f4;color:#111827;filter:invert(1) hue-rotate(180deg)}
+img,picture,video,svg,canvas{filter:invert(1) hue-rotate(180deg)}
+` : 'html{background:#ffffff;color-scheme:light}';
     return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-html,body{margin:0;padding:0;width:100%;min-width:0;max-width:100%;background:#ffffff;color:#111827;color-scheme:light;font:14px/1.55 Arial,sans-serif;overflow-wrap:anywhere;word-break:normal}
+html,body{margin:0;padding:0;width:100%;min-width:0;max-width:100%;font:14px/1.55 Arial,sans-serif;overflow-wrap:anywhere;word-break:normal}
+${frameTheme}
 *,*::before,*::after{box-sizing:border-box}
 body *{min-width:0!important;max-width:100%!important}
 table,tbody,thead,tfoot,tr,td,th,div,section,article,header,footer,main{max-width:100%!important}
@@ -391,7 +397,7 @@ img,video,svg,canvas{max-width:100%!important;height:auto!important}
 pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
 a{color:#0078d4;cursor:pointer}
 </style></head><body>${activeEmailBodyForDisplay}</body></html>`;
-  }, [activeEmailBodyForDisplay]);
+  }, [activeEmailBodyForDisplay, isDarkMode]);
   const formatAddressList = (value?: string) => (value || '')
     .split(/[;,]/)
     .map(part => part.trim())
@@ -1905,7 +1911,7 @@ a{color:#0078d4;cursor:pointer}
               key={`${selectedEmailId || 'mail'}-${shouldRenderRemoteImages ? 'remote' : 'blocked'}-${isDarkMode ? 'dark-shell' : 'light-shell'}`}
               ref={mailBodyFrameRef}
               title="Isolierter E-Mail-Inhalt"
-              className="rich-email-frame block w-full min-w-0 max-w-full border border-slate-200 bg-white shadow-sm dark:border-slate-700"
+              className="rich-email-frame block w-full min-w-0 max-w-full border border-slate-200 bg-white shadow-sm dark:border-[#3b4045] dark:bg-[#17191b]"
               style={{ height: 300 }}
               sandbox="allow-same-origin"
               referrerPolicy="no-referrer"

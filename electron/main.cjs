@@ -1083,6 +1083,28 @@ async function createWindow() {
       font-size: 10px;
       font-weight: 900;
     }
+    .dark #unique-version-history-backdrop {
+      background: rgba(0, 0, 0, 0.56);
+    }
+    .dark #unique-version-history-dialog {
+      background: #1b1e21;
+      color: #e7ebef;
+      border-color: #3d697f;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+    }
+    .dark #unique-version-history-dialog header {
+      background: #22272b;
+      border-color: #3b4248;
+    }
+    .dark #unique-version-history-close {
+      background: #2a2f34;
+      color: #edf1f4;
+      border-color: #454d54;
+    }
+    .dark #unique-version-history-close:hover { background: #343a40; }
+    .dark .unique-version-entry { border-color: #343a40; }
+    .dark .unique-version-entry h3 { color: #7dc9ef; }
+    .dark .unique-version-current { background: #164e3b; color: #bbf7d0; }
   `);
 
   try {
@@ -1099,11 +1121,19 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.5.68 <span class="unique-version-current">aktuell</span></h3><ul><li>Das Ziehen grosser oder mehrerer Nachrichten blockiert nicht mehr beim Start durch die sofortige EML-Dateierzeugung.</li><li>Beim Ablegen in den Verfassen-Editor werden Mail-Anhaenge bei Bedarf erzeugt, auch im abgekoppelten Fenster.</li><li>Die Ordner-Zielmarkierung aktualisiert sich beim Ziehen ohne redundante Statuswechsel.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.69 <span class="unique-version-current">aktuell</span></h3><ul><li>Der isolierte HTML-Mailkoerper folgt dem Hell-/Dunkelmodus sofort und bleibt mit farberhaltender Darstellung lesbar.</li><li>Die dunkle Oberflaeche verwendet ruhigere, neutralere Flaechen und klarere Kontraste zwischen Navigation, Nachrichtenliste und Lesebereich.</li><li>Der Versionsbutton zeigt die echte installierte App-Version; fehlende Eintraege von 0.4.58 bis 0.5.63 wurden im Versionsverlauf nachgetragen.</li><li>Auch der Versionsverlauf besitzt nun eine vollstaendige Darkmode-Darstellung.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.68</h3><ul><li>Das Ziehen grosser oder mehrerer Nachrichten blockiert nicht mehr beim Start durch die sofortige EML-Dateierzeugung.</li><li>Beim Ablegen in den Verfassen-Editor werden Mail-Anhaenge bei Bedarf erzeugt, auch im abgekoppelten Fenster.</li><li>Die Ordner-Zielmarkierung aktualisiert sich beim Ziehen ohne redundante Statuswechsel.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.67</h3><ul><li>Die Anhangsvorschau oeffnet sich nach einem Mailwechsel nicht erneut durch ein kuenstliches Hover-Ereignis.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.66</h3><ul><li>Weitergeleitete Nachrichten uebernehmen ihre vollstaendig geladenen Anlagen automatisch. Bei fehlenden Dateidaten wird die Weiterleitung mit einer klaren Meldung angehalten.</li><li>Mail-Favoriten werden unabhaengig vom begrenzten Schnellcache dauerhaft gespeichert und nach einem Abgleich wiederhergestellt.</li><li>Ordner-Favoriten bleiben bei voruebergehend unvollstaendigen Server-Ordnerlisten erhalten.</li><li>Der Darkmode verwendet ruhigere Flaechen und besser lesbare Kontraste in Navigation, Nachrichtenliste und Lesefenster.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.65</h3><ul><li>Signaturen koennen pro E-Mail-Konto als Klartext oder als bereinigtes HTML mit Inline-Formatierung, Links, Bildern und Vorschau gespeichert werden.</li><li>Empfaengerfelder bleiben bei grossen Verteilerlisten kompakt und lassen sich bei Fokus erweitert und scrollbar bearbeiten.</li><li>Nachrichten koennen jetzt auch ausschliesslich an CC- oder BCC-Empfaenger versendet werden.</li><li>Die Anlagenablage befindet sich im oberen Verfassenbereich; die Signaturauswahl benoetigt weniger Platz.</li><li>Verspaetete Hover-Timer koennen eine PDF-Anlagenvorschau nach einem Nachrichtenwechsel nicht mehr erneut oeffnen.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.64</h3><ul><li>Die Suche kann eindeutig auf den aktuellen Ordner, alle Ordner des aktuellen Kontos oder alle verbundenen Postfaecher begrenzt werden.</li><li>Suchoptionen oeffnen sich beim Fokus auf das Suchfeld und wechseln nach einem Klick ausserhalb des Suchbereichs automatisch zurueck auf Start.</li><li>Das Empfaengerfeld setzt den Texteingabecursor wieder zuverlaessig; konkurrierende Fokus- und verzoegerte Blur-Ereignisse wurden bereinigt.</li><li>Benutzerdefiniertes App-Passwort und administrativer WPF-Suite-Schluessel sind vollstaendig getrennt; der Admin-Bereich verwendet den festen Schluessel nur fuer die aktuelle Sitzung.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.63</h3><ul><li>Kalender-Einstellungen fuer externe Zwei-Wege-Synchronisierung wurden vorbereitet.</li><li>Notizen unterstuetzen Bilder aus Zwischenablage und Kontextmenue; Navigation und interne Produktbezeichnungen wurden bereinigt.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.62</h3><ul><li>Getrennte Sicherheitsbereiche fuer optionalen App-Schutz und administrativen Entwicklerzugang wurden eingefuehrt.</li><li>Die Farbe der Nachrichten-Hoverleiste kann unter Darstellung angepasst werden.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.61</h3><ul><li>Die Suche unterstuetzt aktuellen Ordner, gesamtes Konto und alle verbundenen Postfaecher.</li><li>Suchoptionen stehen im Ribbon und im kompakten Filtermenue zur Verfuegung; Ordnerziele werden beim Verschieben deutlicher markiert.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.60</h3><ul><li>Angepinnte Nachrichten bleiben nach Neustarts dauerhaft gespeichert und oben einsortiert.</li><li>Bildkopieren bestaetigt den Vorgang ohne blockierendes Dialogfenster; der Darkmode wurde erweitert.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.59</h3><ul><li>Anhaenge bieten per Rechtsklick Speichern in Downloads und Speichern unter an.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.58</h3><ul><li>Mail-Prioritaet und Papierkorb leeren wurden in Oberflaeche und Serverkommunikation ergaenzt.</li><li>Ordnerpfade werden bei der Synchronisierung vollstaendiger mit dem Server abgeglichen.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.4.58</h3><ul><li>Mailaenderungen werden in einer dauerhaften Hintergrundwarteschlange nacheinander mit dem Server synchronisiert.</li><li>Suche nach Nachrichten mit Anlagen sowie Datenschutz-, Lizenz- und Open-Source-Unterlagen wurden ergaenzt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.57</h3><ul><li>Beim Erstellen, Antworten, Allen antworten und Weiterleiten liegt der Texteingabecursor automatisch am Anfang des Mailkoerpers; dies gilt auch im abgekoppelten Verfassenfenster.</li><li>Nach dem Klick auf Senden bleibt die App im zuvor geoeffneten Ordner und springt weder in den Postausgang noch nach Gesendet.</li><li>Angepinnte Nachrichten werden unabhaengig von ihrem Alter in einer eigenen Gruppe dauerhaft ganz oben angezeigt und nach dem Loesen wieder chronologisch einsortiert.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.56</h3><ul><li>Die ausgewaehlte E-Mail kann ueber das Ribbon oder ihr Rechtsklickmenue gedruckt beziehungsweise als PDF gespeichert werden.</li><li>Ein nativer Auswahldialog fuehrt wahlweise zum Windows-Druckdialog oder zum Speichern einer PDF-Datei im gewuenschten Ordner.</li><li>Die Ausgabe enthaelt Absender, Empfaenger, Datum, Anlagenliste und den vollstaendigen lokal gespeicherten oder zuvor vom IMAP-Server geladenen Nachrichteninhalt.</li><li>Plaintext-Nachrichten mit Adressen in spitzen Klammern werden nicht mehr faelschlich als HTML erkannt; Absaetze und Zeilenumbrueche bleiben im Lesebereich und in PDFs erhalten.</li><li>Die Druckansicht wird isoliert ohne Skripte und externe Inhalte erzeugt und nach Abschluss automatisch bereinigt.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.4.55</h3><ul><li>Die Nachrichtenliste zeigt fuer Absender beziehungsweise Empfaenger kompakte, lokal erzeugte Kontaktavatare mit gut unterscheidbaren Farben und Initialen.</li><li>Nachrichten werden automatisch in Heute, Gestern, Vorgestern, Letzte Woche, Vor zwei Wochen und Aelter gruppiert.</li><li>Dezente Trennlinien verbessern die Orientierung; die gemischte Virtualisierung beruecksichtigt eigene Hoehen fuer Gruppen und Nachrichten und bleibt auch bei grossen Postfaechern schnell.</li><li>Datumsgruppen und Avatare funktionieren im hellen und dunklen Modus sowie im gemeinsamen Posteingang und in Gesendet.</li></ul></article>',
@@ -1252,9 +1282,11 @@ async function createWindow() {
       ensureButton(
         'unique-window-history-button',
         'Versionsverlauf anzeigen',
-        '0.4.57',
+        ${JSON.stringify(app.getVersion())},
         () => {
           const backdrop = ensureVersionHistoryDialog();
+          const dialog = backdrop.querySelector('#unique-version-history-dialog');
+          if (dialog) dialog.scrollTop = 0;
           backdrop.setAttribute('data-open', 'true');
         }
       );
