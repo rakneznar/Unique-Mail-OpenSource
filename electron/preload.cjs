@@ -127,6 +127,7 @@ contextBridge.exposeInMainWorld('uniqueMailNative', {
   detachCompose: (payload) => ipcRenderer.invoke('native:detach-compose', payload),
   getDetachedComposeState: () => ipcRenderer.invoke('native:get-detached-compose-state'),
   updateDetachedComposeState: (payload) => ipcRenderer.invoke('native:update-detached-compose-state', payload),
+  closeDetachedComposeForLock: () => ipcRenderer.invoke('native:close-detached-compose-for-lock'),
   dockDetachedCompose: (payload) => ipcRenderer.invoke('native:dock-detached-compose', payload),
   sendDetachedCompose: (payload) => ipcRenderer.invoke('native:send-detached-compose', payload),
   onDetachedComposeReplace: (callback) => {

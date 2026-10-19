@@ -18,15 +18,23 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, 
 import AppLogo from './components/AppLogo';
 import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
+import {
+  AppLockConfig,
+  AppLockTimerUnit,
+  DEFAULT_APP_LOCK_TIMER_UNIT,
+  DEFAULT_APP_LOCK_TIMER_VALUE,
+  MAX_APP_LOCK_DURATION_SECONDS,
+  getAppLockDurationMs,
+  normalizeAppLockConfig
+} from './utils/appLock';
 import { LANGUAGE_CATALOG_VERSION, useI18n } from './i18n';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.71';
+const APP_VERSION = '0.5.72';
 const DEVELOPER_PASSWORD_SALT = 'unique-mail-wpf-suite-admin-v1';
 const DEVELOPER_PASSWORD_HASH = 'b85432d324dda9a402159fe262e0c3280cea9a522894a5710aaf60071253d111';
 type FeedbackKind = 'bug' | 'feature';
 type SignatureFormat = 'text' | 'html';
-type AppLockConfig = { enabled: boolean; salt: string; hash: string; updatedAt?: string };
 type CalendarSyncProvider = 'none' | 'caldav' | 'google' | 'microsoft';
 type CalendarSyncSettings = {
   provider: CalendarSyncProvider;
@@ -77,10 +85,7 @@ const readStoredAppLockConfig = (): AppLockConfig | null => {
     if (typeof window === 'undefined') return null;
     const raw = window.localStorage.getItem('uniquemail_app_lock_config');
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed?.enabled && typeof parsed.salt === 'string' && typeof parsed.hash === 'string') {
-      return { enabled: true, salt: parsed.salt, hash: parsed.hash, updatedAt: parsed.updatedAt };
-    }
+    return normalizeAppLockConfig(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -1040,6 +1045,11 @@ exit`;
   const [appLockNewPassword, setAppLockNewPassword] = useState<string>('');
   const [appLockConfirmPassword, setAppLockConfirmPassword] = useState<string>('');
   const [appLockStatus, setAppLockStatus] = useState<string>('');
+  const [appLockTimerEnabledDraft, setAppLockTimerEnabledDraft] = useState<boolean>(() => readStoredAppLockConfig()?.autoLockEnabled ?? false);
+  const [appLockTimerValueDraft, setAppLockTimerValueDraft] = useState<number>(() => readStoredAppLockConfig()?.autoLockValue ?? DEFAULT_APP_LOCK_TIMER_VALUE);
+  const [appLockTimerUnitDraft, setAppLockTimerUnitDraft] = useState<AppLockTimerUnit>(() => readStoredAppLockConfig()?.autoLockUnit ?? DEFAULT_APP_LOCK_TIMER_UNIT);
+  const [appUnlockSequence, setAppUnlockSequence] = useState(0);
+  const appLockDeadlineRef = useRef<number | null>(null);
   const [isDeveloperAccessDialogOpen, setIsDeveloperAccessDialogOpen] = useState<boolean>(false);
   const [isDeveloperSessionUnlocked, setIsDeveloperSessionUnlocked] = useState<boolean>(false);
   const [developerPassword, setDeveloperPassword] = useState<string>('');
@@ -1094,12 +1104,34 @@ exit`;
     const hash = await hashAppLockPassword(password, appLockConfig.salt);
     if (hash === appLockConfig.hash) {
       setIsAppUnlocked(true);
+      setAppUnlockSequence(previous => previous + 1);
       setAppUnlockPassword('');
       setAppUnlockError('');
     } else {
       setAppUnlockError('Falsches App-Passwort.');
     }
   };
+
+  const readAppLockTimerDraft = () => {
+    const value = Math.floor(Number(appLockTimerValueDraft));
+    const maximumValue = appLockTimerUnitDraft === 'seconds'
+      ? MAX_APP_LOCK_DURATION_SECONDS
+      : MAX_APP_LOCK_DURATION_SECONDS / 60;
+    if (appLockTimerEnabledDraft && (!Number.isFinite(value) || value < 1 || value > maximumValue)) {
+      setAppLockStatus(`Der Timer muss zwischen 1 und ${maximumValue} ${appLockTimerUnitDraft === 'seconds' ? 'Sekunden' : 'Minuten'} liegen.`);
+      return null;
+    }
+    return {
+      autoLockEnabled: appLockTimerEnabledDraft,
+      autoLockValue: appLockTimerEnabledDraft ? value : Math.max(1, value || DEFAULT_APP_LOCK_TIMER_VALUE),
+      autoLockUnit: appLockTimerUnitDraft
+    };
+  };
+
+  const appLockTimerDraftMatchesConfig = () => !!appLockConfig
+    && appLockConfig.autoLockEnabled === appLockTimerEnabledDraft
+    && appLockConfig.autoLockValue === Math.floor(Number(appLockTimerValueDraft))
+    && appLockConfig.autoLockUnit === appLockTimerUnitDraft;
 
   const requestDeveloperAccess = () => {
     if (isDeveloperSessionUnlocked) {
@@ -1130,6 +1162,8 @@ exit`;
 
   const handleSaveAppLockPassword = async () => {
     setAppLockStatus('');
+    const timerSettings = readAppLockTimerDraft();
+    if (!timerSettings) return;
     const nextPassword = appLockNewPassword.trim();
     const confirmPassword = appLockConfirmPassword.trim();
     if (!isValidAppLockPassword(nextPassword)) {
@@ -1149,13 +1183,33 @@ exit`;
     }
     const salt = createAppLockSalt();
     const hash = await hashAppLockPassword(nextPassword, salt);
-    setAppLockConfig({ enabled: true, salt, hash, updatedAt: new Date().toISOString() });
+    setAppLockConfig({ enabled: true, salt, hash, updatedAt: new Date().toISOString(), ...timerSettings });
     setAppLockEnabledDraft(true);
     setIsAppUnlocked(true);
+    setAppUnlockSequence(previous => previous + 1);
     setAppLockCurrentPassword('');
     setAppLockNewPassword('');
     setAppLockConfirmPassword('');
-    setAppLockStatus('App-Passwort wurde gespeichert. Beim nächsten Start wird es abgefragt.');
+    setAppLockStatus(timerSettings.autoLockEnabled
+      ? `App-Passwort wurde gespeichert. Die App sperrt sich nach jeder Entsperrung nach ${timerSettings.autoLockValue} ${timerSettings.autoLockUnit === 'seconds' ? 'Sekunden' : 'Minuten'} erneut.`
+      : 'App-Passwort wurde gespeichert. Beim nächsten Start wird es abgefragt.');
+  };
+
+  const handleSaveAppLockTimer = async () => {
+    if (!appLockConfig?.enabled) return;
+    const timerSettings = readAppLockTimerDraft();
+    if (!timerSettings) return;
+    const currentHash = await hashAppLockPassword(appLockCurrentPassword.trim(), appLockConfig.salt);
+    if (currentHash !== appLockConfig.hash) {
+      setAppLockStatus('Zum Ändern des Timers bitte zuerst das aktuelle App-Passwort korrekt eingeben.');
+      return;
+    }
+    setAppLockConfig({ ...appLockConfig, ...timerSettings, updatedAt: new Date().toISOString() });
+    setAppLockCurrentPassword('');
+    setAppUnlockSequence(previous => previous + 1);
+    setAppLockStatus(timerSettings.autoLockEnabled
+      ? `Automatische Sperre gespeichert: ${timerSettings.autoLockValue} ${timerSettings.autoLockUnit === 'seconds' ? 'Sekunden' : 'Minuten'} nach jeder Entsperrung.`
+      : 'Die automatische Sperre wurde deaktiviert. Der Schutz bleibt beim App-Start aktiv.');
   };
 
   const handleRemoveAppLockPassword = async () => {
@@ -1170,6 +1224,9 @@ exit`;
     setAppLockCurrentPassword('');
     setAppLockNewPassword('');
     setAppLockConfirmPassword('');
+    setAppLockTimerEnabledDraft(false);
+    setAppLockTimerValueDraft(DEFAULT_APP_LOCK_TIMER_VALUE);
+    setAppLockTimerUnitDraft(DEFAULT_APP_LOCK_TIMER_UNIT);
     setAppLockStatus('App-Passwort wurde entfernt.');
   };
 
@@ -1184,7 +1241,11 @@ exit`;
       return;
     }
     if (appLockConfig?.enabled && !appLockNewPassword.trim() && !appLockConfirmPassword.trim()) {
-      setAppLockStatus('Der Passwortschutz ist bereits aktiv. Geben Sie nur dann ein neues Passwort ein, wenn Sie es ändern möchten.');
+      if (appLockTimerDraftMatchesConfig()) {
+        setAppLockStatus('Der Passwortschutz und der Timer sind bereits mit diesen Einstellungen aktiv.');
+        return;
+      }
+      await handleSaveAppLockTimer();
       return;
     }
     await handleSaveAppLockPassword();
@@ -1386,13 +1447,18 @@ exit`;
       setImageDownloadDenyList(uniqueSenderList([...deny, ...blocked]));
       setBlockedSenderList(blocked);
       const importedAppLock = security?.appLock;
-      if (importedAppLock?.enabled && typeof importedAppLock.salt === 'string' && typeof importedAppLock.hash === 'string') {
-        setAppLockConfig({ enabled: true, salt: importedAppLock.salt, hash: importedAppLock.hash, updatedAt: importedAppLock.updatedAt });
+      const normalizedImportedAppLock = normalizeAppLockConfig(importedAppLock);
+      if (normalizedImportedAppLock) {
+        setAppLockConfig(normalizedImportedAppLock);
         setAppLockEnabledDraft(true);
+        setAppLockTimerEnabledDraft(normalizedImportedAppLock.autoLockEnabled);
+        setAppLockTimerValueDraft(normalizedImportedAppLock.autoLockValue);
+        setAppLockTimerUnitDraft(normalizedImportedAppLock.autoLockUnit);
         setIsAppUnlocked(true);
       } else if (security && Object.prototype.hasOwnProperty.call(security, 'appLock') && !importedAppLock) {
         setAppLockConfig(null);
         setAppLockEnabledDraft(false);
+        setAppLockTimerEnabledDraft(false);
       }
 
       const nativeApi = (window as any).uniqueMailNative;
@@ -1609,7 +1675,51 @@ exit`;
       localStorage.removeItem('uniquemail_app_lock_config');
       setIsAppUnlocked(true);
     }
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
   }, [appLockConfig]);
+
+  useEffect(() => {
+    const durationMs = getAppLockDurationMs(appLockConfig);
+    if (!isAppUnlocked || durationMs === null) {
+      appLockDeadlineRef.current = null;
+      return;
+    }
+
+    const deadline = Date.now() + durationMs;
+    appLockDeadlineRef.current = deadline;
+    let timeoutId: number | undefined;
+
+    const lockIfExpired = () => {
+      if (appLockDeadlineRef.current !== deadline) return;
+      const remaining = deadline - Date.now();
+      if (remaining > 0) {
+        timeoutId = window.setTimeout(lockIfExpired, Math.min(remaining, 2_147_000_000));
+        return;
+      }
+      appLockDeadlineRef.current = null;
+      void (window as any).uniqueMailNative?.closeDetachedComposeForLock?.();
+      setIsAppUnlocked(false);
+      setAppUnlockPassword('');
+      setAppUnlockError('');
+      setIsOptionsModalOpen(false);
+      setIsDeveloperAccessDialogOpen(false);
+      setDeveloperPassword('');
+      setDeveloperPasswordError('');
+    };
+
+    timeoutId = window.setTimeout(lockIfExpired, Math.min(durationMs, 2_147_000_000));
+    const verifyDeadline = () => {
+      if (Date.now() >= deadline) lockIfExpired();
+    };
+    document.addEventListener('visibilitychange', verifyDeadline);
+    window.addEventListener('focus', verifyDeadline);
+    return () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', verifyDeadline);
+      window.removeEventListener('focus', verifyDeadline);
+      if (appLockDeadlineRef.current === deadline) appLockDeadlineRef.current = null;
+    };
+  }, [appLockConfig, isAppUnlocked, appUnlockSequence]);
   useEffect(() => {
     localStorage.setItem('uniquemail_mail_action_bar_color', mailActionBarColor);
     (window as any).uniqueMailNative?.persistRendererStorage?.();
@@ -4693,6 +4803,9 @@ exit`;
         setIsDense={setIsDense}
         onOpenOptions={() => {
           setAppLockEnabledDraft(!!appLockConfig?.enabled);
+          setAppLockTimerEnabledDraft(appLockConfig?.autoLockEnabled ?? false);
+          setAppLockTimerValueDraft(appLockConfig?.autoLockValue ?? DEFAULT_APP_LOCK_TIMER_VALUE);
+          setAppLockTimerUnitDraft(appLockConfig?.autoLockUnit ?? DEFAULT_APP_LOCK_TIMER_UNIT);
           setAppLockCurrentPassword('');
           setAppLockNewPassword('');
           setAppLockConfirmPassword('');
@@ -5790,6 +5903,64 @@ exit`;
                               </label>
                             </>
                           )}
+                        </div>
+
+                        <div className={`mt-4 rounded-xl border p-3 ${appLockEnabledDraft ? 'border-sky-100 bg-sky-50/50' : 'border-slate-200 bg-slate-100/60 opacity-60'}`}>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[10.5px] font-extrabold uppercase tracking-wider text-slate-800">{t('security.autoRelock')}</p>
+                              <p className="mt-1 text-[10px] leading-4 text-slate-500">{t('security.autoRelockDescription')}</p>
+                            </div>
+                            <label className="flex shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                              <span className="text-[9.5px] font-extrabold uppercase text-slate-600">{t('security.timer')}</span>
+                              <span className="relative inline-flex items-center">
+                                <input
+                                  type="checkbox"
+                                  checked={appLockTimerEnabledDraft}
+                                  disabled={!appLockEnabledDraft}
+                                  onChange={(event) => {
+                                    setAppLockTimerEnabledDraft(event.target.checked);
+                                    setAppLockStatus('Änderung noch nicht gespeichert.');
+                                  }}
+                                  className="peer sr-only"
+                                />
+                                <span className="h-5 w-9 rounded-full bg-slate-300 transition-colors peer-checked:bg-[#0078d4] peer-disabled:cursor-not-allowed after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white" />
+                              </span>
+                            </label>
+                          </div>
+                          <div className="mt-3 grid grid-cols-[minmax(0,1fr)_150px] gap-2">
+                            <label className="block text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500">
+                              {t('security.duration')}
+                              <input
+                                type="number"
+                                min={1}
+                                max={appLockTimerUnitDraft === 'seconds' ? MAX_APP_LOCK_DURATION_SECONDS : MAX_APP_LOCK_DURATION_SECONDS / 60}
+                                step={1}
+                                value={appLockTimerValueDraft}
+                                disabled={!appLockEnabledDraft || !appLockTimerEnabledDraft}
+                                onChange={(event) => {
+                                  setAppLockTimerValueDraft(Number(event.target.value));
+                                  setAppLockStatus('Änderung noch nicht gespeichert.');
+                                }}
+                                className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs font-bold text-slate-900 outline-none focus:border-[#0078d4] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                              />
+                            </label>
+                            <label className="block text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500">
+                              {t('security.unit')}
+                              <select
+                                value={appLockTimerUnitDraft}
+                                disabled={!appLockEnabledDraft || !appLockTimerEnabledDraft}
+                                onChange={(event) => {
+                                  setAppLockTimerUnitDraft(event.target.value as AppLockTimerUnit);
+                                  setAppLockStatus('Änderung noch nicht gespeichert.');
+                                }}
+                                className="mt-1 w-full rounded-lg border border-slate-250 bg-white px-3 py-2 text-xs font-bold text-slate-900 outline-none focus:border-[#0078d4] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                              >
+                                <option value="seconds">{t('security.seconds')}</option>
+                                <option value="minutes">{t('security.minutes')}</option>
+                              </select>
+                            </label>
+                          </div>
                         </div>
 
                         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">

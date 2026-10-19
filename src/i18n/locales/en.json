@@ -92,5 +92,12 @@
   "settings.localizationDescription": "English is the canonical source language. Incomplete or invalid language packs automatically fall back to English. Installed language catalogs are updated with every app update.",
   "settings.catalogVersion": "Language catalog {{version}}",
   "locale.english": "English",
-  "locale.german": "German"
+  "locale.german": "German",
+  "security.autoRelock": "Lock automatically again",
+  "security.autoRelockDescription": "Optional session timer. It restarts after every successful password entry and continues running in the background.",
+  "security.timer": "Timer",
+  "security.duration": "Duration",
+  "security.unit": "Unit",
+  "security.seconds": "Seconds",
+  "security.minutes": "Minutes"
 }

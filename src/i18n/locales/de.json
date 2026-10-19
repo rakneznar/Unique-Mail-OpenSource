@@ -92,5 +92,12 @@
   "settings.localizationDescription": "Englisch ist die verbindliche Quellsprache. Unvollständige oder fehlerhafte Sprachpakete fallen automatisch auf Englisch zurück. Installierte Sprachkataloge werden mit jedem App-Update aktualisiert.",
   "settings.catalogVersion": "Sprachkatalog {{version}}",
   "locale.english": "Englisch",
-  "locale.german": "Deutsch"
+  "locale.german": "Deutsch",
+  "security.autoRelock": "Automatisch erneut sperren",
+  "security.autoRelockDescription": "Optionaler Sitzungstimer. Er beginnt nach jeder erfolgreichen Passworteingabe neu und läuft auch im Hintergrund weiter.",
+  "security.timer": "Timer",
+  "security.duration": "Dauer",
+  "security.unit": "Einheit",
+  "security.seconds": "Sekunden",
+  "security.minutes": "Minuten"
 }

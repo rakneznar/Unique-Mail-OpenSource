@@ -1,10 +1,22 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import englishCatalog from './locales/en.json';
 import germanCatalog from './locales/de.json';
+import arabicCatalog from './locales/ar.json';
+import chineseCatalog from './locales/zh.json';
+import frenchCatalog from './locales/fr.json';
+import italianCatalog from './locales/it.json';
+import japaneseCatalog from './locales/ja.json';
+import koreanCatalog from './locales/ko.json';
+import portugueseCatalog from './locales/pt.json';
+import russianCatalog from './locales/ru.json';
+import spanishCatalog from './locales/es.json';
+import swedishCatalog from './locales/sv.json';
+import thaiCatalog from './locales/th.json';
+import turkishCatalog from './locales/tr.json';
 
 export const DEFAULT_LOCALE = 'en';
 export const FALLBACK_LOCALE = 'en';
-export const LANGUAGE_CATALOG_VERSION = 1;
+export const LANGUAGE_CATALOG_VERSION = 2;
 export const LOCALE_STORAGE_KEY = 'uniquemail_ui_language';
 
 export type LocaleCode = string;
@@ -15,12 +27,26 @@ export type LocaleDefinition = {
   code: LocaleCode;
   nativeName: string;
   englishName: string;
+  formatLocale: string;
+  direction: 'ltr' | 'rtl';
   catalog: TranslationCatalog;
 };
 
 const localeRegistry: LocaleDefinition[] = [
-  { code: 'en', nativeName: 'English', englishName: 'English', catalog: englishCatalog },
-  { code: 'de', nativeName: 'Deutsch', englishName: 'German', catalog: germanCatalog }
+  { code: 'en', nativeName: 'English', englishName: 'English', formatLocale: 'en-GB', direction: 'ltr', catalog: englishCatalog },
+  { code: 'de', nativeName: 'Deutsch', englishName: 'German', formatLocale: 'de-DE', direction: 'ltr', catalog: germanCatalog },
+  { code: 'fr', nativeName: 'Français', englishName: 'French', formatLocale: 'fr-FR', direction: 'ltr', catalog: frenchCatalog },
+  { code: 'es', nativeName: 'Español', englishName: 'Spanish', formatLocale: 'es-ES', direction: 'ltr', catalog: spanishCatalog },
+  { code: 'it', nativeName: 'Italiano', englishName: 'Italian', formatLocale: 'it-IT', direction: 'ltr', catalog: italianCatalog },
+  { code: 'pt', nativeName: 'Português', englishName: 'Portuguese', formatLocale: 'pt-PT', direction: 'ltr', catalog: portugueseCatalog },
+  { code: 'ja', nativeName: '日本語', englishName: 'Japanese', formatLocale: 'ja-JP', direction: 'ltr', catalog: japaneseCatalog },
+  { code: 'zh', nativeName: '中文', englishName: 'Chinese', formatLocale: 'zh-CN', direction: 'ltr', catalog: chineseCatalog },
+  { code: 'ru', nativeName: 'Русский', englishName: 'Russian', formatLocale: 'ru-RU', direction: 'ltr', catalog: russianCatalog },
+  { code: 'sv', nativeName: 'Svenska', englishName: 'Swedish', formatLocale: 'sv-SE', direction: 'ltr', catalog: swedishCatalog },
+  { code: 'tr', nativeName: 'Türkçe', englishName: 'Turkish', formatLocale: 'tr-TR', direction: 'ltr', catalog: turkishCatalog },
+  { code: 'ar', nativeName: 'العربية', englishName: 'Arabic', formatLocale: 'ar-SA', direction: 'rtl', catalog: arabicCatalog },
+  { code: 'th', nativeName: 'ไทย', englishName: 'Thai', formatLocale: 'th-TH', direction: 'ltr', catalog: thaiCatalog },
+  { code: 'ko', nativeName: '한국어', englishName: 'Korean', formatLocale: 'ko-KR', direction: 'ltr', catalog: koreanCatalog }
 ];
 
 const catalogs = new Map(localeRegistry.map(locale => [locale.code, locale.catalog]));
@@ -69,6 +95,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     localStorage.setItem(LOCALE_STORAGE_KEY, locale);
     document.documentElement.lang = locale;
+    document.documentElement.dir = localeRegistry.find(candidate => candidate.code === locale)?.direction || 'ltr';
   }, [locale]);
 
   const value = useMemo<I18nContextValue>(() => ({
@@ -76,7 +103,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     setLocale,
     locales: availableLocales,
     t,
-    formatLocale: locale === 'de' ? 'de-DE' : locale === 'en' ? 'en-US' : locale
+    formatLocale: localeRegistry.find(candidate => candidate.code === locale)?.formatLocale || 'en-GB'
   }), [locale, setLocale, t]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

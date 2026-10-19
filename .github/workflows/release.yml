@@ -32,6 +32,9 @@ jobs:
       - name: Validate language catalogs
         run: npm run test:i18n
 
+      - name: Test app-lock timer
+        run: npm run test:app-lock
+
       - name: Build Windows installer
         run: npm run dist:win
 
