@@ -99,5 +99,8 @@
   "security.duration": "Dauer",
   "security.unit": "Einheit",
   "security.seconds": "Sekunden",
-  "security.minutes": "Minuten"
+  "security.minutes": "Minuten",
+  "onboarding.languageTitle": "Sprache auswählen",
+  "onboarding.languageDescription": "Wählen Sie die Sprache aus, die Sie in Unique Mail verwenden möchten. Sie können sie später in den Einstellungen ändern.",
+  "onboarding.continue": "Weiter"
 }

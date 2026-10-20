@@ -16,7 +16,7 @@ import turkishCatalog from './locales/tr.json';
 
 export const DEFAULT_LOCALE = 'en';
 export const FALLBACK_LOCALE = 'en';
-export const LANGUAGE_CATALOG_VERSION = 2;
+export const LANGUAGE_CATALOG_VERSION = 3;
 export const LOCALE_STORAGE_KEY = 'uniquemail_ui_language';
 
 export type LocaleCode = string;
@@ -89,13 +89,19 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const [locale, setLocaleState] = useState<LocaleCode>(() => normalizeLocale(localStorage.getItem(LOCALE_STORAGE_KEY) || DEFAULT_LOCALE));
+  const [localeSelectionConfirmed, setLocaleSelectionConfirmed] = useState(() => Boolean(localStorage.getItem(LOCALE_STORAGE_KEY)));
   const setLocale = useCallback((nextLocale: LocaleCode) => setLocaleState(normalizeLocale(nextLocale)), []);
   const t = useCallback((key: string, params?: TranslationParams) => translate(locale, key, params), [locale]);
 
   useEffect(() => {
-    localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+    if (localeSelectionConfirmed) localStorage.setItem(LOCALE_STORAGE_KEY, locale);
     document.documentElement.lang = locale;
     document.documentElement.dir = localeRegistry.find(candidate => candidate.code === locale)?.direction || 'ltr';
+  }, [locale, localeSelectionConfirmed]);
+
+  const confirmLocaleSelection = useCallback(() => {
+    localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+    setLocaleSelectionConfirmed(true);
   }, [locale]);
 
   const value = useMemo<I18nContextValue>(() => ({
@@ -106,7 +112,46 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     formatLocale: localeRegistry.find(candidate => candidate.code === locale)?.formatLocale || 'en-GB'
   }), [locale, setLocale, t]);
 
-  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+  return (
+    <I18nContext.Provider value={value}>
+      {localeSelectionConfirmed ? children : (
+        <main className="flex min-h-screen items-center justify-center bg-slate-100 p-4 text-slate-900" dir={localeRegistry.find(candidate => candidate.code === locale)?.direction || 'ltr'}>
+          <section className="w-full max-w-3xl rounded-lg border border-slate-200 bg-white p-5 shadow-xl sm:p-7" role="dialog" aria-modal="true" aria-labelledby="initial-language-title">
+            <div className="mb-5 border-b border-slate-200 pb-4">
+              <p className="mb-1 text-[11px] font-extrabold uppercase text-blue-600">Unique Mail</p>
+              <h1 id="initial-language-title" className="text-xl font-bold text-slate-950 sm:text-2xl">{t('onboarding.languageTitle')}</h1>
+              <p className="mt-1.5 text-sm leading-5 text-slate-600">{t('onboarding.languageDescription')}</p>
+            </div>
+
+            <div className="grid max-h-[52vh] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4" role="radiogroup" aria-label={t('settings.interfaceLanguage')}>
+              {availableLocales.map(candidate => {
+                const selected = candidate.code === locale;
+                return (
+                  <button
+                    key={candidate.code}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setLocale(candidate.code)}
+                    className={`min-h-14 rounded-lg border px-3 py-2 text-start transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${selected ? 'border-blue-600 bg-blue-50 text-blue-950' : 'border-slate-200 bg-white text-slate-800 hover:border-blue-300 hover:bg-slate-50'}`}
+                  >
+                    <span className="block text-sm font-bold">{candidate.nativeName}</span>
+                    <span className="block text-[11px] text-slate-500">{candidate.englishName}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 flex justify-end border-t border-slate-200 pt-4">
+              <button type="button" onClick={confirmLocaleSelection} className="min-h-10 rounded-lg bg-blue-600 px-6 text-sm font-bold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                {t('onboarding.continue')}
+              </button>
+            </div>
+          </section>
+        </main>
+      )}
+    </I18nContext.Provider>
+  );
 }
 
 export const useI18n = () => {
