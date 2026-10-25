@@ -101,6 +101,18 @@ contextBridge.exposeInMainWorld('uniqueMailWindow', {
 
 contextBridge.exposeInMainWorld('uniqueMailNative', {
   openExternal: (url) => ipcRenderer.invoke('native:open-external', url),
+  getDefaultMailAppStatus: () => ipcRenderer.invoke('native:get-default-mail-app-status'),
+  openDefaultMailAppSettings: () => ipcRenderer.invoke('native:open-default-mail-app-settings'),
+  getPendingMailto: () => ipcRenderer.invoke('native:get-pending-mailto'),
+  onOpenMailto: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => {
+      callback(payload);
+      void ipcRenderer.invoke('native:ack-mailto', payload?.id).catch(() => undefined);
+    };
+    ipcRenderer.on('native:open-mailto', listener);
+    return () => ipcRenderer.removeListener('native:open-mailto', listener);
+  },
   chooseDownloadDirectory: () => ipcRenderer.invoke('native:choose-download-directory'),
   getDefaultDownloadDirectory: () => ipcRenderer.invoke('native:get-default-download-directory'),
   saveAttachment: (payload) => ipcRenderer.invoke('native:save-attachment', payload),

@@ -15,6 +15,6 @@ Partial translation catalogs are supported intentionally. Missing keys resolve t
 
 ## Bundled languages
 
-Catalog version 3 bundles English, German, French, Spanish, Italian, Portuguese, Japanese, Simplified Chinese, Russian, Swedish, Turkish, Arabic, Thai, and Korean. Locale-specific date formatting and text direction live in the same registry as the catalog, so a language cannot be exposed without its runtime metadata. On a fresh installation, the application remains behind the localized language setup screen until the user confirms a language; that choice is then stored locally and reused on subsequent starts.
+Catalog version 4 bundles English, German, French, Spanish, Italian, Portuguese, Japanese, Simplified Chinese, Russian, Swedish, Turkish, Arabic, Thai, and Korean. Locale-specific date formatting and text direction live in the same registry as the catalog, so a language cannot be exposed without its runtime metadata. On a fresh installation, the application remains behind the localized language setup screen until the user confirms a language; that choice is then stored locally and reused on subsequent starts. The Windows default-mail prompt and its permanent settings action are translated in every bundled catalog.
 
 The validation step checks every JSON catalog against the canonical English keys and verifies placeholders. It also reports translation coverage, allowing a new language to enter continuous localization before every string is translated while retaining the guaranteed English fallback.

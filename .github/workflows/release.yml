@@ -35,6 +35,9 @@ jobs:
       - name: Test app-lock timer
         run: npm run test:app-lock
 
+      - name: Test Windows default-mail integration
+        run: npm run test:default-mail
+
       - name: Build Windows installer
         run: npm run dist:win
 

@@ -16,7 +16,7 @@ import turkishCatalog from './locales/tr.json';
 
 export const DEFAULT_LOCALE = 'en';
 export const FALLBACK_LOCALE = 'en';
-export const LANGUAGE_CATALOG_VERSION = 3;
+export const LANGUAGE_CATALOG_VERSION = 4;
 export const LOCALE_STORAGE_KEY = 'uniquemail_ui_language';
 
 export type LocaleCode = string;

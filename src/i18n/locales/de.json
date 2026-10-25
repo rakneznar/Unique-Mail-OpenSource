@@ -102,5 +102,12 @@
   "security.minutes": "Minuten",
   "onboarding.languageTitle": "Sprache auswählen",
   "onboarding.languageDescription": "Wählen Sie die Sprache aus, die Sie in Unique Mail verwenden möchten. Sie können sie später in den Einstellungen ändern.",
-  "onboarding.continue": "Weiter"
+  "onboarding.continue": "Weiter",
+  "defaultMail.title": "Unique Mail als Standard-E-Mail-App verwenden?",
+  "defaultMail.description": "Windows kann E-Mail-Links direkt in Unique Mail öffnen. Möchten Sie die App jetzt als Standard-E-Mail-App auswählen?",
+  "defaultMail.notNow": "Nicht jetzt",
+  "defaultMail.openSettings": "Windows-Einstellungen öffnen",
+  "defaultMail.settingsTitle": "Windows-Standard-E-Mail-App",
+  "defaultMail.settingsDescription": "Legen Sie fest, mit welcher App Windows E-Mail-Links öffnet.",
+  "defaultMail.openError": "Die Windows-Einstellungen für Standard-Apps konnten nicht geöffnet werden."
 }

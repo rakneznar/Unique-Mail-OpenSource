@@ -36,6 +36,15 @@ export interface ComposeMailPayload {
   sourceId?: string;
 }
 
+export interface MailtoComposeRequest {
+  id: string;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  body: string;
+}
+
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward' | 'resend' | 'draft' | 'outbox';
 
 interface ReadingPaneProps {
@@ -55,6 +64,7 @@ interface ReadingPaneProps {
   isWritingEmail: boolean;
   setIsWritingEmail: (val: boolean) => void;
   composeMode: ComposeMode;
+  initialComposeRequest?: MailtoComposeRequest | null;
   forwardSourceEmail?: Email | null;
   onSendEmail: (message: ComposeMailPayload) => Promise<void> | void;
   onSaveDraft: (message: ComposeMailPayload) => Promise<void> | void;
@@ -103,6 +113,7 @@ export default function ReadingPane({
   isWritingEmail,
   setIsWritingEmail,
   composeMode,
+  initialComposeRequest,
   forwardSourceEmail,
   onSendEmail,
   onSaveDraft,
@@ -983,7 +994,22 @@ a{color:#0078d4;cursor:pointer}
 
       setComposeAccountEmail(activeEmail?.accountEmail || defaultComposeAccountEmail);
 
-      if (activeEmail && composeMode === 'resend') {
+      if (composeMode === 'new' && initialComposeRequest) {
+        const escapedBody = String(initialComposeRequest.body || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\r?\n/g, '<br/>');
+        const initialComposeHtml = `${escapedBody}<br/><br/>${signatureHtml}`;
+        setComposeDraftId(`draft-${Date.now()}`);
+        setToInput(initialComposeRequest.to || '');
+        setCcInput(initialComposeRequest.cc || '');
+        setBccInput(initialComposeRequest.bcc || '');
+        setShowCcBcc(!!(initialComposeRequest.cc || initialComposeRequest.bcc));
+        setSubjectInput(initialComposeRequest.subject || '');
+        setBodyInput(initialComposeHtml);
+        if (editorRef.current) editorRef.current.innerHTML = initialComposeHtml;
+      } else if (activeEmail && composeMode === 'resend') {
         setComposeDraftId(`draft-${Date.now()}`);
         setToInput(activeEmail.recipientEmail || '');
         setCcInput(activeEmail.ccEmail || '');
@@ -1073,7 +1099,7 @@ a{color:#0078d4;cursor:pointer}
         composeInitializedRef.current = true;
       });
     }
-  }, [isWritingEmail, selectedEmailId, composeMode, signatureActive, signatureText, signatureFormat, defaultComposeAccountEmail, accountOptions.length, focusComposeEditorAtStart]);
+  }, [isWritingEmail, selectedEmailId, composeMode, initialComposeRequest?.id, signatureActive, signatureText, signatureFormat, defaultComposeAccountEmail, accountOptions.length, focusComposeEditorAtStart]);
 
   const buildComposePayload = React.useCallback(async (): Promise<ComposeMailPayload> => {
     const freshAttachments = await Promise.all(composeAttachments.map(fileToAttachmentPayload));

@@ -102,5 +102,12 @@
   "security.minutes": "Minutes",
   "onboarding.languageTitle": "Choose your language",
   "onboarding.languageDescription": "Select the language you want to use in Unique Mail. You can change it later in Settings.",
-  "onboarding.continue": "Continue"
+  "onboarding.continue": "Continue",
+  "defaultMail.title": "Make Unique Mail your default email app?",
+  "defaultMail.description": "Windows can open email links directly in Unique Mail. Would you like to choose it now as your default email app?",
+  "defaultMail.notNow": "Not now",
+  "defaultMail.openSettings": "Open Windows settings",
+  "defaultMail.settingsTitle": "Windows default email app",
+  "defaultMail.settingsDescription": "Choose which app Windows uses to open email links.",
+  "defaultMail.openError": "Windows Default Apps settings could not be opened."
 }

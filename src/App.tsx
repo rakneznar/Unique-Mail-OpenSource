@@ -11,7 +11,7 @@ import Ribbon from './components/Ribbon';
 import NavigationRail from './components/NavigationRail';
 import FolderTree from './components/FolderTree';
 import ItemList from './components/ItemList';
-import ReadingPane, { ComposeMailPayload, ComposeMode } from './components/ReadingPane';
+import ReadingPane, { ComposeMailPayload, ComposeMode, MailtoComposeRequest } from './components/ReadingPane';
 import ArchTab from './components/ArchTab';
 import NotesView from './components/NotesView';
 import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, KnownRecipient, MailFilter, MailSearchScope, MailSort } from './types';
@@ -30,7 +30,7 @@ import {
 import { LANGUAGE_CATALOG_VERSION, useI18n } from './i18n';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.73';
+const APP_VERSION = '0.5.74';
 const DEVELOPER_PASSWORD_SALT = 'unique-mail-wpf-suite-admin-v1';
 const DEVELOPER_PASSWORD_HASH = 'b85432d324dda9a402159fe262e0c3280cea9a522894a5710aaf60071253d111';
 type FeedbackKind = 'bug' | 'feature';
@@ -111,6 +111,7 @@ const RECIPIENT_HISTORY_STORAGE_KEY = 'uniquemail_recipient_history';
 const PENDING_MAIL_MUTATIONS_STORAGE_KEY = 'uniquemail_pending_mail_mutations_v1';
 const PINNED_MAIL_KEYS_STORAGE_KEY = 'uniquemail_pinned_mail_keys_v1';
 const FAVORITE_MAIL_KEYS_STORAGE_KEY = 'uniquemail_favorite_mail_keys_v1';
+const DEFAULT_MAIL_PROMPT_STORAGE_KEY = 'uniquemail_default_mail_prompt_v1';
 
 const mailPinIdentityKeys = (mail: Email) => {
   const account = String(mail.accountEmail || '').trim().toLowerCase();
@@ -1016,6 +1017,8 @@ exit`;
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState<boolean>(false);
   const [optionsActiveTab, setOptionsActiveTab] = useState<'general' | 'appearance' | 'language' | 'accounts' | 'calendar' | 'security' | 'images' | 'ai' | 'help' | 'vacation' | 'signature'>('general');
   const [autoMarkAsReadOnOpen, setAutoMarkAsReadOnOpen] = useState<boolean>(() => localStorage.getItem('uniquemail_auto_mark_read_on_open') !== 'false');
+  const [showDefaultMailPrompt, setShowDefaultMailPrompt] = useState(false);
+  const [windowsDefaultMailSupported, setWindowsDefaultMailSupported] = useState(false);
   const [mailDateFormat, setMailDateFormat] = useState<string>(() => localStorage.getItem('uniquemail_mail_date_format') || DEFAULT_MAIL_DATE_FORMAT);
   const [attachmentDownloadDirectory, setAttachmentDownloadDirectory] = useState<string>(() => localStorage.getItem('uniquemail_attachment_download_directory') || '');
   const [recipientHistory, setRecipientHistory] = useState<KnownRecipient[]>(() => sanitizeRecipientHistory(readJsonStorage(RECIPIENT_HISTORY_STORAGE_KEY, [])));
@@ -2215,6 +2218,7 @@ exit`;
   const [isOffline, setIsOffline] = useState<boolean>(false);
   const [isWritingEmail, setIsWritingEmail] = useState<boolean>(false);
   const [composeMode, setComposeMode] = useState<ComposeMode>('new');
+  const [mailtoComposeRequest, setMailtoComposeRequest] = useState<MailtoComposeRequest | null>(null);
   const [forwardSourceEmail, setForwardSourceEmail] = useState<Email | null>(null);
   const restoredComposeDraftRef = useRef(false);
   const draftOriginalsRef = useRef<Map<string, Email>>(new Map());
@@ -2638,10 +2642,53 @@ exit`;
 
   // Compose / Write Email
   const handleNewEmailTrigger = () => {
+    setMailtoComposeRequest(null);
     setSelectedEmailId(null);
     setComposeMode('new');
     setIsWritingEmail(true);
     setCurrentPage('mail');
+  };
+
+  useEffect(() => {
+    const nativeApi = (window as any).uniqueMailNative;
+    let disposed = false;
+    void nativeApi?.getDefaultMailAppStatus?.().then((status: { supported?: boolean; isDefault?: boolean } | undefined) => {
+      if (disposed || !status?.supported) return;
+      setWindowsDefaultMailSupported(true);
+      if (status.isDefault) {
+        localStorage.setItem(DEFAULT_MAIL_PROMPT_STORAGE_KEY, 'completed');
+        return;
+      }
+      if (localStorage.getItem(DEFAULT_MAIL_PROMPT_STORAGE_KEY) !== 'completed') setShowDefaultMailPrompt(true);
+    }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, []);
+
+  useEffect(() => {
+    const nativeApi = (window as any).uniqueMailNative;
+    const openMailto = (request?: MailtoComposeRequest | null) => {
+      if (!request?.id) return;
+      setMailtoComposeRequest(request);
+      setSelectedEmailId(null);
+      setComposeMode('new');
+      setIsWritingEmail(true);
+      setCurrentPage('mail');
+    };
+    const unsubscribe = nativeApi?.onOpenMailto?.(openMailto);
+    void nativeApi?.getPendingMailto?.().then(openMailto).catch(() => undefined);
+    return () => unsubscribe?.();
+  }, []);
+
+  const finishDefaultMailPrompt = () => {
+    localStorage.setItem(DEFAULT_MAIL_PROMPT_STORAGE_KEY, 'completed');
+    (window as any).uniqueMailNative?.persistRendererStorage?.();
+    setShowDefaultMailPrompt(false);
+  };
+
+  const openWindowsDefaultMailSettings = async (finishPrompt = false) => {
+    const result = await (window as any).uniqueMailNative?.openDefaultMailAppSettings?.();
+    if (result?.ok && finishPrompt) finishDefaultMailPrompt();
+    if (result?.ok === false && !result?.unsupported) alert(result.error || t('defaultMail.openError'));
   };
 
   // Send email through the configured SMTP account and persist a local sent/outbox copy.
@@ -4726,6 +4773,30 @@ exit`;
         </div>
       )}
 
+      {showDefaultMailPrompt && (
+        <div className="fixed inset-0 z-[280] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="default-mail-title">
+          <div className="w-[460px] max-w-full rounded-lg border border-blue-200 bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[#0078d4]">
+                <Mail className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 id="default-mail-title" className="text-base font-black text-slate-900">{t('defaultMail.title')}</h2>
+                <p className="mt-1 text-[11px] font-semibold leading-5 text-slate-500">{t('defaultMail.description')}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+              <button type="button" onClick={finishDefaultMailPrompt} className="rounded-lg border border-slate-250 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                {t('defaultMail.notNow')}
+              </button>
+              <button type="button" onClick={() => void openWindowsDefaultMailSettings(true)} className="rounded-lg bg-[#0078d4] px-4 py-2.5 text-xs font-black text-white shadow-sm hover:bg-[#106ebe]">
+                {t('defaultMail.openSettings')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isDeveloperAccessDialogOpen && (
         <div id="unique-developer-lock-overlay" className="fixed inset-0 z-[320] flex items-center justify-center bg-slate-950/75 backdrop-blur-sm p-4">
           <form
@@ -5135,6 +5206,7 @@ exit`;
               isWritingEmail={isWritingEmail}
               setIsWritingEmail={setIsWritingEmail}
               composeMode={composeMode}
+              initialComposeRequest={mailtoComposeRequest}
               forwardSourceEmail={forwardSourceEmail}
               onSendEmail={handleSendEmail}
               onSaveDraft={handleSaveDraft}
@@ -5375,6 +5447,17 @@ exit`;
                           <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0078d4]"></div>
                         </label>
                       </div>
+                      {windowsDefaultMailSupported && (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 flex items-center justify-between gap-4">
+                          <div>
+                            <p className="text-[11px] font-extrabold text-slate-900 uppercase tracking-wider">{t('defaultMail.settingsTitle')}</p>
+                            <p className="text-[10px] text-slate-500 mt-1 leading-4">{t('defaultMail.settingsDescription')}</p>
+                          </div>
+                          <button type="button" onClick={() => void openWindowsDefaultMailSettings(false)} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-[10px] font-extrabold text-[#0078d4] hover:bg-blue-50">
+                            {t('defaultMail.openSettings')}
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-3 rounded-xl border border-slate-300 bg-white p-4 shadow-sm">

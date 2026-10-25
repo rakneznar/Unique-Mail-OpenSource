@@ -6,5 +6,6 @@
   "date.today": "今天", "date.yesterday": "昨天", "date.dayBeforeYesterday": "前天", "date.lastWeek": "上周", "date.twoWeeksAgo": "两周前", "date.older": "更早",
   "settings.languageTab": "语言", "settings.languageAndDate": "语言和日期格式", "settings.interfaceLanguage": "界面语言", "settings.dateFormat": "邮件列表中的日期格式", "settings.attachmentDestination": "附件下载位置", "settings.defaultDownloads": "默认：Windows 下载", "settings.chooseFolder": "选择文件夹", "settings.default": "默认", "settings.localizationDescription": "英语是标准源语言。不完整或无效的语言包会自动回退到英语。已安装的语言目录会随每次应用更新而更新。", "settings.catalogVersion": "语言目录 {{version}}", "locale.english": "英语", "locale.german": "德语",
   "security.autoRelock": "自动重新锁定", "security.autoRelockDescription": "可选的会话计时器。每次密码验证成功后重新启动，并在后台继续运行。", "security.timer": "计时器", "security.duration": "时长", "security.unit": "单位", "security.seconds": "秒", "security.minutes": "分钟",
-  "onboarding.languageTitle": "选择语言", "onboarding.languageDescription": "请选择要在Unique Mail中使用的语言。之后可在设置中更改。", "onboarding.continue": "继续"
+  "onboarding.languageTitle": "选择语言", "onboarding.languageDescription": "请选择要在Unique Mail中使用的语言。之后可在设置中更改。", "onboarding.continue": "继续",
+  "defaultMail.title": "将Unique Mail设为默认邮件应用？", "defaultMail.description": "Windows可以直接在Unique Mail中打开邮件链接。是否现在将其选为默认邮件应用？", "defaultMail.notNow": "暂不", "defaultMail.openSettings": "打开Windows设置", "defaultMail.settingsTitle": "Windows默认邮件应用", "defaultMail.settingsDescription": "选择Windows用于打开邮件链接的应用。", "defaultMail.openError": "无法打开Windows默认应用设置。"
 }

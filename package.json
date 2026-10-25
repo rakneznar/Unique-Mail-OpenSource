@@ -1,7 +1,7 @@
 {
   "name": "unique-mail",
   "private": true,
-  "version": "0.5.73",
+  "version": "0.5.74",
   "description": "Local-first desktop mail client with IMAP/SMTP synchronization for Windows.",
   "author": "PACOPAR",
   "license": "Apache-2.0",
@@ -15,7 +15,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "npm run test:i18n && npm run test:app-lock && vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --sourcemap --outfile=dist/server.cjs",
+    "build": "npm run test:i18n && npm run test:app-lock && npm run test:default-mail && vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "desktop": "npm run build && electron .",
     "dist:win": "npm run build && electron-builder --win nsis --publish never",
@@ -25,6 +25,7 @@
     "test:i18n": "node scripts/validate-locales.cjs",
     "test:app-lock": "tsx scripts/test-app-lock.ts",
     "test:favorites": "node scripts/test-favorite-state.cjs",
+    "test:default-mail": "node scripts/test-default-mail.cjs",
     "notices": "node scripts/generate-third-party-notices.cjs",
     "dist:portable": "npm run build && electron-builder --win portable",
     "dist:all": "npm run build && electron-builder --win nsis portable"
@@ -62,6 +63,7 @@
       "icon": "electron/assets/icon.ico"
     },
     "nsis": {
+      "include": "electron/installer.nsh",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": false,

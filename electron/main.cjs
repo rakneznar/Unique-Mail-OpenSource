@@ -7,8 +7,10 @@ const https = require('https');
 const path = require('path');
 const { printableEmailDocument } = require('./print-email-document.cjs');
 const { readFavoriteStateFile, writeFavoriteStateFile } = require('./favorite-state.cjs');
+const { findMailtoRequest } = require('./mailto.cjs');
 
 const DEFAULT_UPDATE_FEED_URL = 'https://github.com/rakneznar/Unique-Mail-OpenSource/releases/latest/download/latest.json';
+const WINDOWS_REGISTERED_APP_NAME = 'Unique Mail';
 let PORT = 0;
 let serverProcess = null;
 let mainWindow = null;
@@ -19,8 +21,22 @@ const approvedWindowCloses = new WeakSet();
 let uniqueMailDataPaths = null;
 let lastKnownUpdate = null;
 const preparedAttachmentDrags = new Map();
+let pendingMailtoRequest = null;
 
 app.setName('Unique Mail');
+
+function queueMailtoRequest(commandLine) {
+  const request = findMailtoRequest(commandLine);
+  if (!request) return false;
+  pendingMailtoRequest = request;
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send('native:open-mailto', request);
+    focusMainWindow();
+  }
+  return true;
+}
+
+pendingMailtoRequest = findMailtoRequest(process.argv);
 
 process.on('uncaughtException', error => log(`main uncaughtException: ${error?.stack || error}`));
 process.on('unhandledRejection', error => log(`main unhandledRejection: ${error?.stack || error}`));
@@ -1149,7 +1165,8 @@ async function createWindow() {
           '<section id="unique-version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="unique-version-history-title">',
           '<header><div><h2 id="unique-version-history-title">Versionsverlauf</h2><p>Bugfixes, neue Funktionen und wichtige Aenderungen.</p></div><button id="unique-version-history-close" type="button" aria-label="Versionsverlauf schliessen">x</button></header>',
           '<div class="unique-version-history-body">',
-          '<article class="unique-version-entry"><h3>Version 0.5.73 <span class="unique-version-current">aktuell</span></h3><ul><li>Bei einer Neuinstallation fordert Unique Mail vor dem Start der eigentlichen App zur einmaligen Sprachauswahl auf.</li><li>Alle 14 Sprachen stehen direkt im Einrichtungsdialog bereit und schalten dessen Texte bereits bei der Auswahl live um.</li><li>Erst nach der Bestaetigung wird die Auswahl lokal gespeichert und bei allen folgenden App-Starts automatisch wiederverwendet.</li><li>Die Mail-Oberflaeche und Kontosynchronisierung werden erst nach Abschluss der Sprachauswahl gestartet.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.74 <span class="unique-version-current">aktuell</span></h3><ul><li>Der Windows-Installer registriert Unique Mail als auswaehlbaren E-Mail-Client fuer mailto-Links unter Standard-Apps.</li><li>Beim ersten geeigneten App-Start wird einmalig gefragt, ob die Windows-Auswahlseite fuer Unique Mail geoeffnet werden soll; die Entscheidung bleibt vollstaendig beim Benutzer.</li><li>Die Standard-App-Auswahl kann dauerhaft in den allgemeinen Einstellungen erneut geoeffnet werden.</li><li>mailto-Links oeffnen eine neue Nachricht und uebernehmen Empfaenger, CC, BCC, Betreff und Nachrichtentext.</li></ul></article>',
+          '<article class="unique-version-entry"><h3>Version 0.5.73</h3><ul><li>Bei einer Neuinstallation fordert Unique Mail vor dem Start der eigentlichen App zur einmaligen Sprachauswahl auf.</li><li>Alle 14 Sprachen stehen direkt im Einrichtungsdialog bereit und schalten dessen Texte bereits bei der Auswahl live um.</li><li>Erst nach der Bestaetigung wird die Auswahl lokal gespeichert und bei allen folgenden App-Starts automatisch wiederverwendet.</li><li>Die Mail-Oberflaeche und Kontosynchronisierung werden erst nach Abschluss der Sprachauswahl gestartet.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.72</h3><ul><li>Der optionale App-Passwortschutz kann die Anwendung nach einer frei waehlbaren Dauer in Sekunden oder Minuten automatisch erneut sperren.</li><li>Die Frist beginnt nach jeder erfolgreichen Passworteingabe neu und wird als absolute Deadline auch nach Standby oder Hintergrundphasen zuverlaessig geprueft.</li><li>Timer-Aenderungen an einem bestehenden Schutz erfordern das aktuelle App-Passwort; alte Konfigurationen bleiben ohne erzwungenen Timer kompatibel.</li><li>Abgekoppelte Verfassenfenster werden beim Sperren sicher angedockt, ohne den aktuellen Entwurf zu verlieren.</li><li>Die zentrale Sprachdatenbank umfasst nun Englisch, Deutsch, Franzoesisch, Spanisch, Italienisch, Portugiesisch, Japanisch, Chinesisch, Russisch, Schwedisch, Tuerkisch, Arabisch, Thai und Koreanisch mit englischem Fallback und automatischer Katalogpruefung.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.71</h3><ul><li>Eine zentrale, versionierte Sprachdatenbank ersetzt verstreute Sprachabfragen in Navigation, Ribbon, Suche und Nachrichtenliste.</li><li>Englisch ist die kanonische Quell- und Standardsprache; fehlende, leere oder nicht verfuegbare Uebersetzungen fallen immer auf Englisch zurueck.</li><li>Sprachkataloge werden mit jedem App-Update gemeinsam ausgeliefert und vor jedem Build auf Schluessel, Inhalte und Platzhalter geprueft.</li><li>Der Sprachwaehler wird direkt aus dem zentralen Register erzeugt und die Auswahl dauerhaft gespeichert.</li></ul></article>',
           '<article class="unique-version-entry"><h3>Version 0.5.70</h3><ul><li>Nachrichten- und Ordnerfavoriten werden in einer eigenen dauerhaften Datei mit Sicherungskopie gespeichert und beim Upgrade automatisch aus dem bisherigen Speicher migriert.</li><li>Abgekoppelte Verfassenfenster koennen globale Einstellungen und Favoriten nicht mehr mit einem aelteren Zustand ueberschreiben.</li><li>Unvollstaendige Server-Ordnerlisten und kurzzeitige Lesefehler blenden oder loeschen Ordnerfavoriten nicht mehr.</li><li>Message-ID und rueckwaertskompatible Identitaeten halten Nachrichtenfavoriten bei Konto-, Ordner-, UID- und Pfadwechseln stabil.</li></ul></article>',
@@ -1710,6 +1727,40 @@ ipcMain.handle('native:open-external', async (_event, url) => {
   return { ok: true };
 });
 
+ipcMain.handle('native:get-default-mail-app-status', async () => ({
+  supported: process.platform === 'win32' && app.isPackaged,
+  isDefault: process.platform === 'win32' && app.isPackaged
+    ? app.isDefaultProtocolClient('mailto')
+    : false
+}));
+
+ipcMain.handle('native:open-default-mail-app-settings', async () => {
+  if (process.platform !== 'win32') return { ok: false, unsupported: true };
+  const targetedSettingsUri = `ms-settings:defaultapps?registeredAppUser=${encodeURIComponent(WINDOWS_REGISTERED_APP_NAME)}`;
+  try {
+    await shell.openExternal(targetedSettingsUri);
+    return { ok: true };
+  } catch (error) {
+    try {
+      await shell.openExternal('ms-settings:defaultapps');
+      return { ok: true, fallback: true };
+    } catch (fallbackError) {
+      return { ok: false, error: fallbackError.message || error.message || String(fallbackError) };
+    }
+  }
+});
+
+ipcMain.handle('native:get-pending-mailto', async () => {
+  const request = pendingMailtoRequest;
+  pendingMailtoRequest = null;
+  return request;
+});
+
+ipcMain.handle('native:ack-mailto', async (_event, requestId) => {
+  if (pendingMailtoRequest?.id === String(requestId || '')) pendingMailtoRequest = null;
+  return { ok: true };
+});
+
 ipcMain.handle('native:get-default-download-directory', async () => app.getPath('downloads'));
 
 ipcMain.handle('native:choose-download-directory', async () => {
@@ -1900,7 +1951,8 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, commandLine) => {
+    queueMailtoRequest(commandLine);
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
