@@ -7,11 +7,12 @@ import React from 'react';
 import { 
   Paperclip, Flag, Mail, MailOpen, AlertCircle, Search, UserCheck, 
   Clock, CheckSquare, Square, CalendarDays, SignalHigh, Check, FileCode,
-  Pin, Star, Trash2, Plus, X, Printer, ListFilter, CheckCircle2
+  Pin, Star, Trash2, Plus, X, Printer, ListFilter, CheckCircle2, Loader2
 } from 'lucide-react';
 import { Email, Contact, Task, CalendarItem, Category, MailFilter, MailSearchScope, MailSort } from '../types';
 import { addEmailsToDragData } from '../utils/eml';
 import { useI18n } from '../i18n';
+import { mailMatchesSearch } from '../utils/mailSearch';
 
 export type MailDateGroup = 'today' | 'yesterday' | 'dayBeforeYesterday' | 'lastWeek' | 'twoWeeksAgo' | 'older';
 
@@ -117,6 +118,8 @@ interface ItemListProps {
   setSearchQuery: (query: string) => void;
   mailSearchScope: MailSearchScope;
   setMailSearchScope: (scope: MailSearchScope) => void;
+  deepSearchMatchIds?: string[] | null;
+  deepSearchPending?: boolean;
   mailFilter: MailFilter;
   setMailFilter: (filter: MailFilter) => void;
   mailSort: MailSort;
@@ -171,6 +174,8 @@ export default function ItemList({
   setSearchQuery,
   mailSearchScope,
   setMailSearchScope,
+  deepSearchMatchIds = null,
+  deepSearchPending = false,
   mailFilter,
   setMailFilter,
   mailSort,
@@ -358,7 +363,11 @@ export default function ItemList({
             }
             className="w-full text-xs pl-8 pr-7 py-2 border border-slate-250 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-[#0078d4] text-slate-800 bg-slate-50/60 placeholder-slate-400 transition-all"
           />
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+          {deepSearchPending && currentPage === 'mail' && searchQuery.trim() ? (
+            <Loader2 className="absolute left-3 top-2.5 h-3.5 w-3.5 animate-spin text-[#0078d4]" />
+          ) : (
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+          )}
           {searchQuery && (
             <button 
               onClick={() => setSearchQuery('')}
@@ -486,14 +495,7 @@ export default function ItemList({
         
         {/* === EMAILS LIST === */}
         {currentPage === 'mail' && (() => {
-          // Helper for Outlook Classic attachment full text scanning
-          const getAttachmentSearchContent = (email: Email) => {
-            return [...(email.attachments || []), ...(email.draftAttachments || [])]
-              .map(attachment => attachment.filename || '')
-              .filter(Boolean)
-              .join(' ');
-          };
-
+          const deepSearchMatches = deepSearchMatchIds === null ? null : new Set(deepSearchMatchIds);
           const normalizeFolderKey = (value?: string) => (value || 'inbox').trim().replace(/\\/g, '/').toLowerCase();
           const folderMatches = (mailFolderRaw: string | undefined, selectedFolderRaw: string) => {
             const mailFolder = normalizeFolderKey(mailFolderRaw);
@@ -540,21 +542,18 @@ export default function ItemList({
               return true;
             })
             // Outlook Classic high fidelity full text lookup including categories and attachments
-            .filter(e => 
-              matchesFullText([
-                e.sender, 
-                e.senderEmail, 
-                e.recipientEmail,
-                e.recipientName,
-                e.ccEmail,
-                e.bccEmail,
-                e.subject, 
-                e.body, 
-                e.preview, 
-                e.category, 
-                getAttachmentSearchContent(e)
-              ], searchQuery)
-            );
+            .filter(e => {
+              if (!searchQuery.trim()) return true;
+              const localMatch = mailMatchesSearch({
+                ...e,
+                attachments: [
+                  ...(e.attachments || []),
+                  ...(e.draftAttachments || [])
+                ]
+              }, searchQuery);
+              if (deepSearchMatches === null) return localMatch;
+              return deepSearchMatches.has(e.id) || (!e.imapUid && localMatch);
+            });
 
           if (filteredEmails.length === 0) {
             return (

@@ -38,6 +38,9 @@ jobs:
       - name: Test Windows default-mail integration
         run: npm run test:default-mail
 
+      - name: Test mail full-text search
+        run: npm run test:mail-search
+
       - name: Build Windows installer
         run: npm run dist:win
 

@@ -30,7 +30,7 @@ import {
 import { LANGUAGE_CATALOG_VERSION, useI18n } from './i18n';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.74';
+const APP_VERSION = '0.5.75';
 const DEVELOPER_PASSWORD_SALT = 'unique-mail-wpf-suite-admin-v1';
 const DEVELOPER_PASSWORD_HASH = 'b85432d324dda9a402159fe262e0c3280cea9a522894a5710aaf60071253d111';
 type FeedbackKind = 'bug' | 'feature';
@@ -2224,6 +2224,9 @@ exit`;
   const draftOriginalsRef = useRef<Map<string, Email>>(new Map());
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [mailSearchScope, setMailSearchScope] = useState<MailSearchScope>('folder');
+  const [deepSearchMatchIds, setDeepSearchMatchIds] = useState<string[] | null>(null);
+  const [deepSearchPending, setDeepSearchPending] = useState(false);
+  const deepSearchRequestRef = useRef(0);
   const [mailFilter, setMailFilter] = useState<MailFilter>('all');
   const [mailSort, setMailSort] = useState<MailSort>('date-desc');
   const [selectedFolder, setSelectedFolder] = useState<string>('inbox');
@@ -3546,6 +3549,106 @@ exit`;
     }
     return null;
   };
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    const requestId = deepSearchRequestRef.current + 1;
+    deepSearchRequestRef.current = requestId;
+    if (currentPage !== 'mail' || !query) {
+      setDeepSearchMatchIds(null);
+      setDeepSearchPending(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setDeepSearchMatchIds(null);
+    setDeepSearchPending(true);
+
+    const resolveSearchFolder = (account: any) => {
+      const requested = selectedFolder === 'unified-inbox' ? 'inbox' : selectedFolder;
+      const normalized = String(requested || 'inbox').toLowerCase();
+      const folderList = Array.isArray(account?.serverFolders) ? account.serverFolders : [];
+      const aliases: Record<string, string[]> = {
+        inbox: ['inbox', 'posteingang'],
+        sent: ['sent', 'gesendet'],
+        deleted: ['trash', 'deleted', 'papierkorb', 'gelöscht', 'gelöschte'],
+        drafts: ['draft', 'drafts', 'entwurf', 'entwürfe'],
+        junk: ['junk', 'spam'],
+        archive: ['archive', 'archiv'],
+        outbox: ['outbox', 'postausgang']
+      };
+      const roleAliases = aliases[normalized];
+      if (!roleAliases) return requested;
+      const bySpecialUse = folderList.find((folder: any) => {
+        const specialUse = String(folder.specialUse || '').toLowerCase().replace('\\', '');
+        return roleAliases.some(alias => specialUse.includes(alias));
+      });
+      if (bySpecialUse) return bySpecialUse.path || bySpecialUse.id || requested;
+      const byPath = folderList.find((folder: any) => {
+        const value = `${folder.path || folder.id || ''} ${folder.label || ''}`.toLowerCase();
+        return roleAliases.some(alias => value.includes(alias));
+      });
+      return byPath?.path || byPath?.id || requested;
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        const targetAccounts = mailSearchScope === 'all-mailboxes' || selectedFolder === 'unified-inbox'
+          ? accounts
+          : accounts.filter(account => !activeAccountEmail || account.email.toLowerCase() === activeAccountEmail.toLowerCase());
+        const responses = await Promise.all(targetAccounts.map(async account => {
+          try {
+            const password = isOffline ? null : await getStoredAccountPasswordNoPrompt(account);
+            const response = await fetch('/api/mail/search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              signal: controller.signal,
+              body: JSON.stringify({
+                email: account.email,
+                password: password || undefined,
+                imapServer: account.imapServer,
+                imapPort: account.imapPort,
+                query,
+                folders: mailSearchScope === 'folder' ? [resolveSearchFolder(account)] : []
+              })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Mail search failed.');
+            return data;
+          } catch (error: any) {
+            if (error?.name !== 'AbortError') console.warn('Deep mail search failed', account.email, error);
+            return null;
+          }
+        }));
+        if (controller.signal.aborted || deepSearchRequestRef.current !== requestId) return;
+
+        const successful = responses.filter(Boolean);
+        if (successful.length === 0) {
+          setDeepSearchMatchIds(null);
+          return;
+        }
+        const ids = Array.from(new Set(successful.flatMap(result => Array.isArray(result.ids) ? result.ids : [])));
+        const resultEmails = successful.flatMap(result => Array.isArray(result.emails) ? result.emails : []) as Email[];
+        if (resultEmails.length > 0) {
+          setEmails(previous => {
+            const knownIds = new Set(previous.map(mail => mail.id));
+            const additions = resultEmails
+              .filter(mail => mail?.id && !knownIds.has(mail.id))
+              .map(mail => applyPersistedFavorite(applyPersistedPin(guardBlockedSenderMail(mail))));
+            return additions.length > 0 ? [...additions, ...previous] : previous;
+          });
+        }
+        setDeepSearchMatchIds(ids);
+      })().finally(() => {
+        if (deepSearchRequestRef.current === requestId) setDeepSearchPending(false);
+      });
+    }, 500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [searchQuery, mailSearchScope, selectedFolder, activeAccountEmail, accounts, accountSessionPasswords, currentPage, isOffline]);
 
   useEffect(() => {
     if (!browserMailCacheLoaded || accounts.length === 0) return;
@@ -5154,6 +5257,8 @@ exit`;
               setSearchQuery={setSearchQuery}
               mailSearchScope={mailSearchScope}
               setMailSearchScope={setMailSearchScope}
+              deepSearchMatchIds={deepSearchMatchIds}
+              deepSearchPending={deepSearchPending}
               mailFilter={mailFilter}
               setMailFilter={setMailFilter}
               mailSort={mailSort}

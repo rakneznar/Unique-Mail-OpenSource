@@ -7,6 +7,12 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 import type Mail from "nodemailer/lib/mailer";
+import {
+  buildMailSearchDocument,
+  mailSearchDocumentMatches,
+  mailSearchFolderMatches,
+  mailSearchTokens
+} from "./src/utils/mailSearch";
 
 type SyncInboxRequest = {
   email: string;
@@ -27,6 +33,12 @@ type MailBodyRequest = SyncInboxRequest & {
   uid: number;
   uidValidity?: string;
   forceRefresh?: boolean;
+};
+
+type SearchMailRequest = Partial<SyncInboxRequest> & {
+  email: string;
+  query: string;
+  folders?: string[];
 };
 
 type FolderMoveRequest = SyncInboxRequest & {
@@ -548,6 +560,23 @@ function storedMailBodyPath(email: string, folder: string, uid: number, uidValid
   return path.join(permanentMailStoreDir(), stableStoreSegment(email), stableStoreSegment(folder), stableStoreSegment(uidValidity || "current"), `${uid}.json`);
 }
 
+const mailSearchDocumentCache = new Map<string, string | null>();
+const MAIL_SEARCH_DOCUMENT_CACHE_LIMIT = 4000;
+
+function storedMailSearchKey(email: string, folder: string, uid: number, uidValidity = "") {
+  return `${email.toLowerCase()}|${folder.toLowerCase()}|${uidValidity || "current"}|${uid}`;
+}
+
+function rememberMailSearchDocument(key: string, document: string | null) {
+  mailSearchDocumentCache.delete(key);
+  mailSearchDocumentCache.set(key, document);
+  while (mailSearchDocumentCache.size > MAIL_SEARCH_DOCUMENT_CACHE_LIMIT) {
+    const oldestKey = mailSearchDocumentCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    mailSearchDocumentCache.delete(oldestKey);
+  }
+}
+
 async function readStoredMailBody(email: string, folder: string, uid: number, uidValidity = "") {
   try {
     return JSON.parse(await fs.readFile(storedMailBodyPath(email, folder, uid, uidValidity), "utf8"));
@@ -574,6 +603,32 @@ async function writeStoredMailBody(email: string, folder: string, uid: number, v
     await fs.rm(temporary, { force: true }).catch(() => undefined);
     throw error;
   });
+  rememberMailSearchDocument(storedMailSearchKey(email, folder, uid, uidValidity), buildMailSearchDocument((value || {}) as any));
+}
+
+async function readStoredMailSearchDocument(email: string, folder: string, uid: number, uidValidity = "") {
+  const key = storedMailSearchKey(email, folder, uid, uidValidity);
+  if (mailSearchDocumentCache.has(key)) {
+    const document = mailSearchDocumentCache.get(key) ?? null;
+    if (document !== null) rememberMailSearchDocument(key, document);
+    return document;
+  }
+  const stored = await readStoredMailBody(email, folder, uid, uidValidity);
+  const document = stored ? buildMailSearchDocument(stored) : null;
+  rememberMailSearchDocument(key, document);
+  return document;
+}
+
+async function processWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
+  let nextIndex = 0;
+  const runners = Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex];
+      nextIndex += 1;
+      await worker(item);
+    }
+  });
+  await Promise.all(runners);
 }
 
 function mailMetadataOnly(mail: any) {
@@ -724,6 +779,173 @@ async function startServer() {
     res.json({
       ...cached,
       emails: cachedEmails.map(mailMetadataOnly),
+    });
+  });
+
+  app.post("/api/mail/search", async (req, res) => {
+    const {
+      email,
+      query,
+      folders: requestedFolderValues = [],
+      password,
+      imapServer,
+      imapPort
+    } = req.body as SearchMailRequest;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const normalizedQuery = String(query || "").trim().slice(0, 500);
+    const tokens = mailSearchTokens(normalizedQuery);
+    const requestedFolders = Array.from(new Set(
+      (Array.isArray(requestedFolderValues) ? requestedFolderValues : [])
+        .map(value => String(value || "").trim())
+        .filter(Boolean)
+    ));
+
+    if (!normalizedEmail || tokens.length === 0) {
+      return res.status(400).json({ error: "E-Mail-Konto und Suchbegriff sind erforderlich." });
+    }
+
+    const folderRequested = (folder: string) => requestedFolders.length === 0
+      || requestedFolders.some(requested => mailSearchFolderMatches(folder, requested));
+    const cached = await readMailCache(normalizedEmail);
+    const cachedFolders = Array.isArray(cached?.folders) ? cached.folders : [];
+    const cachedEmails = (Array.isArray(cached?.emails) ? cached.emails : [])
+      .filter((mail: any) => folderRequested(String(mail.imapFolder || mail.folder || "INBOX")));
+    const resultIds = new Set<string>();
+    const resultEmails = new Map<string, any>();
+    const incompleteFolders = new Set<string>();
+    const searchedFolders = new Set<string>();
+    const failedFolders: string[] = [];
+    const cachedCounts = new Map<string, number>();
+    const cachedByFolderUid = new Map<string, any>();
+
+    for (const mail of cachedEmails) {
+      const folder = String(mail.imapFolder || mail.folder || "INBOX");
+      const folderKey = folder.toLowerCase();
+      cachedCounts.set(folderKey, (cachedCounts.get(folderKey) || 0) + 1);
+      const uid = getMailUid(mail);
+      if (uid) cachedByFolderUid.set(`${folderKey}|${uid}`, mail);
+    }
+
+    await processWithConcurrency(cachedEmails, 24, async (mail: any) => {
+      const folder = String(mail.imapFolder || mail.folder || "INBOX");
+      const uid = getMailUid(mail);
+      const metadataDocument = buildMailSearchDocument(mail);
+      const storedDocument = uid
+        ? await readStoredMailSearchDocument(normalizedEmail, folder, uid, String(mail.imapUidValidity || ""))
+        : null;
+      if (uid && storedDocument === null) incompleteFolders.add(folder.toLowerCase());
+      if (mailSearchDocumentMatches(`${metadataDocument} ${storedDocument || ""}`, tokens)) {
+        resultIds.add(String(mail.id));
+        resultEmails.set(String(mail.id), mailMetadataOnly(mail));
+      }
+    });
+
+    for (const folder of cachedFolders) {
+      const folderPath = String(folder.path || folder.id || "");
+      if (!folderPath || !folderRequested(folderPath)) continue;
+      const serverCount = Number(folder.status?.messages || 0);
+      if (serverCount > (cachedCounts.get(folderPath.toLowerCase()) || 0)) {
+        incompleteFolders.add(folderPath.toLowerCase());
+      }
+    }
+
+    const requestedFolderMissingFromCache = requestedFolders.some(requested => (
+      !cachedFolders.some((folder: any) => mailSearchFolderMatches(folder.path || folder.id, requested))
+    ));
+    const canSearchOnline = !!password && !!imapServer && !!imapPort;
+    const shouldSearchOnline = canSearchOnline
+      && (incompleteFolders.size > 0 || cachedFolders.length === 0 || requestedFolderMissingFromCache);
+
+    if (shouldSearchOnline) {
+      const client = createImapClient({
+        email: normalizedEmail,
+        password: String(password),
+        imapServer: String(imapServer),
+        imapPort: Number(imapPort)
+      });
+      try {
+        await client.connect();
+        const listedFolders = await client.list({
+          statusQuery: { messages: true, uidValidity: true }
+        });
+        const selectableFolders = listedFolders.filter(folder => (
+          !Array.from(folder.flags || []).some(flag => String(flag).toLowerCase() === "\\noselect")
+          && folderRequested(folder.path)
+        ));
+
+        for (const folderInfo of selectableFolders) {
+          const folderKey = folderInfo.path.toLowerCase();
+          const listedCount = Number((folderInfo.status as any)?.messages || 0);
+          const needsServerSearch = incompleteFolders.has(folderKey)
+            || listedCount > (cachedCounts.get(folderKey) || 0)
+            || !cachedFolders.some((folder: any) => mailSearchFolderMatches(folder.path || folder.id, folderInfo.path));
+          if (!needsServerSearch || listedCount === 0) continue;
+
+          let lock;
+          try {
+            lock = await client.getMailboxLock(folderInfo.path);
+            let matchingUids: Set<number> | null = null;
+            const serverTokens = normalizedQuery.split(/\s+/).filter(Boolean).slice(0, 12);
+            for (const token of serverTokens) {
+              const searchResult = await client.search({ text: token }, { uid: true });
+              if (!Array.isArray(searchResult)) throw new Error("Der IMAP-Server hat die Suche abgelehnt.");
+              const tokenMatches = new Set(searchResult.map(Number).filter(value => Number.isFinite(value) && value > 0));
+              matchingUids = matchingUids === null
+                ? tokenMatches
+                : new Set(Array.from(matchingUids).filter(uid => tokenMatches.has(uid)));
+              if (matchingUids.size === 0) break;
+            }
+
+            const uidValidity = (client.mailbox as any)?.uidValidity?.toString()
+              || (folderInfo.status as any)?.uidValidity?.toString()
+              || "";
+            const uncachedUids: number[] = [];
+            for (const uid of matchingUids || []) {
+              const id = makeImapEmailId(normalizedEmail, folderInfo.path, uid);
+              resultIds.add(id);
+              const cachedMail = cachedByFolderUid.get(`${folderKey}|${uid}`);
+              if (cachedMail) resultEmails.set(id, mailMetadataOnly(cachedMail));
+              else uncachedUids.push(uid);
+            }
+
+            if (uncachedUids.length > 0) {
+              const fetched = await client.fetchAll(uncachedUids, {
+                uid: true,
+                envelope: true,
+                flags: true
+              }, { uid: true });
+              for (const message of fetched) {
+                const mail = buildEmailFromEnvelope(message, folderInfo.path, normalizedEmail, uidValidity);
+                resultEmails.set(mail.id, mailMetadataOnly(mail));
+              }
+            }
+            searchedFolders.add(folderKey);
+          } catch (folderError: any) {
+            failedFolders.push(folderInfo.path);
+            console.warn("IMAP search folder skipped", {
+              email: normalizedEmail,
+              folder: folderInfo.path,
+              message: folderError?.message
+            });
+          } finally {
+            if (lock) lock.release();
+          }
+        }
+      } catch (error: any) {
+        console.warn("IMAP deep search unavailable", { email: normalizedEmail, message: error?.message });
+      } finally {
+        await client.logout().catch(() => undefined);
+      }
+    }
+
+    const unresolvedFolders = Array.from(incompleteFolders).filter(folder => !searchedFolders.has(folder));
+    res.json({
+      ids: Array.from(resultIds),
+      emails: Array.from(resultEmails.values()),
+      complete: unresolvedFolders.length === 0 && failedFolders.length === 0,
+      searchedFolders: Array.from(searchedFolders),
+      unresolvedFolders,
+      failedFolders
     });
   });
 
