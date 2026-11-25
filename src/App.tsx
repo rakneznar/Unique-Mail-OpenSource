@@ -18,6 +18,7 @@ import { Email, Task, Note, Category, Contact, CalendarItemDraft, CalendarItem, 
 import AppLogo from './components/AppLogo';
 import { parseRecipientTokens } from './utils/recipients';
 import { looksLikeHtmlMailBody } from './utils/mailBody';
+import { normalizeEmailAddressForProvider, resolveMailProviderSettings as resolveServerSettings } from './utils/mailProviders';
 import {
   AppLockConfig,
   AppLockTimerUnit,
@@ -30,7 +31,7 @@ import {
 import { LANGUAGE_CATALOG_VERSION, useI18n } from './i18n';
 import { ShieldAlert, RefreshCw, Layers, Plus, Mail, MailOpen, Pin, Star, Trash2, Settings, Tag, Palette, Download, Upload, Zap, CalendarDays, Server, Cloud } from 'lucide-react';
 
-const APP_VERSION = '0.5.75';
+const APP_VERSION = '0.5.77';
 const DEVELOPER_PASSWORD_SALT = 'unique-mail-wpf-suite-admin-v1';
 const DEVELOPER_PASSWORD_HASH = 'b85432d324dda9a402159fe262e0c3280cea9a522894a5710aaf60071253d111';
 type FeedbackKind = 'bug' | 'feature';
@@ -392,78 +393,6 @@ export default function App() {
     return queued;
   };
 
-  const normalizeProviderDomain = (domain: string) => {
-    const normalized = domain.trim().toLowerCase();
-    if (normalized === 'mailde') return 'mail.de';
-    if (normalized === 'webde') return 'web.de';
-    if (normalized === 'gmxde') return 'gmx.de';
-    return normalized;
-  };
-
-  const normalizeEmailAddressForProvider = (email: string) => {
-    const trimmed = email.trim();
-    const [localPart, rawDomain] = trimmed.split('@');
-    if (!localPart || !rawDomain) return trimmed;
-    return `${localPart}@${normalizeProviderDomain(rawDomain)}`;
-  };
-
-  const PROVIDER_PRESETS: Array<{
-    match: (domain: string) => boolean;
-    imapServer: string;
-    smtpServer: string;
-    imapPort?: number;
-    smtpPort?: number;
-    provider: string;
-  }> = [
-    { match: d => d === 'gmail.com' || d === 'googlemail.com', imapServer: 'imap.gmail.com', smtpServer: 'smtp.gmail.com', imapPort: 993, smtpPort: 465, provider: 'Google Workspace / Gmail' },
-    { match: d => d.includes('gmx.'), imapServer: 'imap.gmx.net', smtpServer: 'mail.gmx.net', imapPort: 993, smtpPort: 465, provider: 'GMX Freemail' },
-    { match: d => d === 'mail.de', imapServer: 'imap.mail.de', smtpServer: 'smtp.mail.de', imapPort: 993, smtpPort: 587, provider: 'mail.de' },
-    { match: d => d.includes('web.de'), imapServer: 'imap.web.de', smtpServer: 'smtp.web.de', imapPort: 993, smtpPort: 587, provider: 'WEB.DE Freemail' },
-    { match: d => d.includes('outlook.com') || d.includes('hotmail.') || d.includes('live.') || d.includes('msn.'), imapServer: 'outlook.office365.com', smtpServer: 'smtp-mail.outlook.com', imapPort: 993, smtpPort: 587, provider: 'Microsoft Live / Outlook.com' },
-    { match: d => d.includes('office365.') || d.includes('microsoft365.') || d.includes('onmicrosoft.com'), imapServer: 'outlook.office365.com', smtpServer: 'smtp.office365.com', imapPort: 993, smtpPort: 587, provider: 'Microsoft 365 / Exchange Online' },
-    { match: d => d === 'icloud.com' || d === 'me.com' || d === 'mac.com', imapServer: 'imap.mail.me.com', smtpServer: 'smtp.mail.me.com', imapPort: 993, smtpPort: 587, provider: 'Apple iCloud Mail' },
-    { match: d => d.includes('yahoo.'), imapServer: 'imap.mail.yahoo.com', smtpServer: 'smtp.mail.yahoo.com', imapPort: 993, smtpPort: 465, provider: 'Yahoo Mail' },
-    { match: d => d.includes('aol.'), imapServer: 'imap.aol.com', smtpServer: 'smtp.aol.com', imapPort: 993, smtpPort: 465, provider: 'AOL Mail' },
-    { match: d => d.includes('t-online.de') || d.includes('magenta.de'), imapServer: 'secureimap.t-online.de', smtpServer: 'securesmtp.t-online.de', imapPort: 993, smtpPort: 465, provider: 'Telekom / T-Online' },
-    { match: d => d.includes('freenet.'), imapServer: 'mx.freenet.de', smtpServer: 'mx.freenet.de', imapPort: 993, smtpPort: 587, provider: 'freenet Mail' },
-    { match: d => d === 'posteo.de', imapServer: 'posteo.de', smtpServer: 'posteo.de', imapPort: 993, smtpPort: 587, provider: 'Posteo' },
-    { match: d => d === 'mailbox.org', imapServer: 'imap.mailbox.org', smtpServer: 'smtp.mailbox.org', imapPort: 993, smtpPort: 465, provider: 'mailbox.org' },
-    { match: d => d.includes('ionos.') || d.includes('1und1.') || d.includes('1and1.'), imapServer: 'imap.ionos.de', smtpServer: 'smtp.ionos.de', imapPort: 993, smtpPort: 587, provider: 'IONOS / 1&1 Mail' },
-    { match: d => d.includes('strato.'), imapServer: 'imap.strato.de', smtpServer: 'smtp.strato.de', imapPort: 993, smtpPort: 465, provider: 'STRATO Mail' },
-    { match: d => d.includes('zoho.'), imapServer: 'imap.zoho.eu', smtpServer: 'smtp.zoho.eu', imapPort: 993, smtpPort: 465, provider: 'Zoho Mail' },
-    { match: d => d.includes('fastmail.'), imapServer: 'imap.fastmail.com', smtpServer: 'smtp.fastmail.com', imapPort: 993, smtpPort: 465, provider: 'Fastmail' },
-    { match: d => d.includes('yandex.'), imapServer: 'imap.yandex.com', smtpServer: 'smtp.yandex.com', imapPort: 993, smtpPort: 465, provider: 'Yandex Mail' },
-    { match: d => d.includes('proton.') || d.includes('pm.me'), imapServer: '127.0.0.1', smtpServer: '127.0.0.1', imapPort: 1143, smtpPort: 1025, provider: 'Proton Mail Bridge' },
-    { match: d => d.includes('mail.com'), imapServer: 'imap.mail.com', smtpServer: 'smtp.mail.com', imapPort: 993, smtpPort: 587, provider: 'mail.com' },
-    { match: d => d === 'inbox.lv' || d === 'inbox.eu' || d.endsWith('.inbox.lv') || d.endsWith('.inbox.eu'), imapServer: 'mail.inbox.lv', smtpServer: 'mail.inbox.lv', imapPort: 993, smtpPort: 587, provider: 'Inbox.lv / Inbox.eu' },
-    { match: d => d.includes('hostinger.'), imapServer: 'imap.hostinger.com', smtpServer: 'smtp.hostinger.com', imapPort: 993, smtpPort: 465, provider: 'Hostinger Email' },
-    { match: d => d.includes('privateemail.') || d.includes('namecheap.'), imapServer: 'mail.privateemail.com', smtpServer: 'mail.privateemail.com', imapPort: 993, smtpPort: 465, provider: 'Namecheap Private Email' },
-    { match: d => d === 'spacemail.com' || d.endsWith('.spacemail.com') || d === 'spaceship.com' || d.endsWith('.spaceship.com'), imapServer: 'mail.spacemail.com', smtpServer: 'smtp.spacemail.com', imapPort: 993, smtpPort: 465, provider: 'Spaceship Spacemail' }
-  ];
-  // central parameters-resolution service for Auto-Discovery
-  const resolveServerSettings = (email: string) => {
-    const domain = normalizeProviderDomain(email.split('@')[1] || 'domain.de');
-    const suffix = domain.split('.')[0] || 'Web';
-    const preset = PROVIDER_PRESETS.find(item => item.match(domain));
-
-    if (preset) {
-      return {
-        imapServer: preset.imapServer,
-        imapPort: preset.imapPort ?? 993,
-        smtpServer: preset.smtpServer,
-        smtpPort: preset.smtpPort ?? 465,
-        provider: preset.provider
-      };
-    }
-
-    return {
-      imapServer: 'imap.' + domain,
-      imapPort: 993,
-      smtpServer: 'smtp.' + domain,
-      smtpPort: 465,
-      provider: suffix.toUpperCase() + ' Mail-Dienst (Auto-Discovered)'
-    };
-  };
 
   const resolveServerSettingsOnline = async (email: string) => {
     const fallback = resolveServerSettings(email);
@@ -5668,18 +5597,29 @@ exit`;
                         {t('settings.languageAndDate')}
                       </h3>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
-                        <label className="block">
-                          <span className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5">{t('settings.interfaceLanguage')}</span>
-                          <select
-                            value={uiLanguage}
-                            onChange={(e) => setUiLanguage(e.target.value)}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-[#0078d4]"
-                          >
-                            {availableLocales.map(locale => (
-                              <option key={locale.code} value={locale.code}>{locale.nativeName} ({locale.englishName})</option>
-                            ))}
-                          </select>
-                        </label>
+                        <div className="block">
+                          <div id="settings-interface-language-label" className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">{t('settings.interfaceLanguage')}</div>
+                          <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8" role="radiogroup" aria-labelledby="settings-interface-language-label">
+                            {availableLocales.map(locale => {
+                              const selected = uiLanguage === locale.code;
+                              return (
+                                <button
+                                  key={locale.code}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={selected}
+                                  aria-label={`${locale.nativeName} (${locale.englishName})`}
+                                  title={`${locale.nativeName} (${locale.englishName})`}
+                                  onClick={() => setUiLanguage(locale.code)}
+                                  className={`flex min-h-[58px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border px-1 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0078d4] ${selected ? 'border-[#0078d4] bg-blue-50 shadow-sm ring-1 ring-[#0078d4]/30' : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50'}`}
+                                >
+                                  <span className="text-[22px] leading-7" aria-hidden="true">{locale.flag}</span>
+                                  <span className={`max-w-full truncate text-[9px] font-bold leading-3 ${selected ? 'text-[#005a9e]' : 'text-slate-600'}`}>{locale.nativeName}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                         <label className="block">
                           <span className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5">{t('settings.dateFormat')}</span>
                           <select

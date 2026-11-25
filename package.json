@@ -1,7 +1,7 @@
 {
   "name": "unique-mail",
   "private": true,
-  "version": "0.5.75",
+  "version": "0.5.77",
   "description": "Local-first desktop mail client with IMAP/SMTP synchronization for Windows.",
   "author": "PACOPAR",
   "license": "Apache-2.0",
@@ -15,7 +15,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "npm run test:i18n && npm run test:app-lock && npm run test:default-mail && npm run test:mail-search && vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --sourcemap --outfile=dist/server.cjs && npm run test:mail-search-api",
+    "build": "npm run test:i18n && npm run test:mail-providers && npm run test:app-lock && npm run test:default-mail && npm run test:mail-search && vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --sourcemap --outfile=dist/server.cjs && npm run test:mail-search-api",
     "start": "node dist/server.cjs",
     "desktop": "npm run build && electron .",
     "dist:win": "npm run build && electron-builder --win nsis --publish never",
@@ -23,6 +23,7 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); require('fs').rmSync('server.js',{force:true})\"",
     "lint": "tsc --noEmit",
     "test:i18n": "node scripts/validate-locales.cjs",
+    "test:mail-providers": "tsx scripts/test-mail-providers.ts",
     "test:app-lock": "tsx scripts/test-app-lock.ts",
     "test:favorites": "node scripts/test-favorite-state.cjs",
     "test:default-mail": "node scripts/test-default-mail.cjs",

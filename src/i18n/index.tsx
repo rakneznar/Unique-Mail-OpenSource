@@ -13,10 +13,21 @@ import spanishCatalog from './locales/es.json';
 import swedishCatalog from './locales/sv.json';
 import thaiCatalog from './locales/th.json';
 import turkishCatalog from './locales/tr.json';
+import hindiCatalog from './locales/hi.json';
+import bengaliCatalog from './locales/bn.json';
+import indonesianCatalog from './locales/id.json';
+import urduCatalog from './locales/ur.json';
+import marathiCatalog from './locales/mr.json';
+import teluguCatalog from './locales/te.json';
+import hausaCatalog from './locales/ha.json';
+import punjabiCatalog from './locales/pa.json';
+import vietnameseCatalog from './locales/vi.json';
+import tamilCatalog from './locales/ta.json';
+import dutchCatalog from './locales/nl.json';
 
 export const DEFAULT_LOCALE = 'en';
 export const FALLBACK_LOCALE = 'en';
-export const LANGUAGE_CATALOG_VERSION = 4;
+export const LANGUAGE_CATALOG_VERSION = 6;
 export const LOCALE_STORAGE_KEY = 'uniquemail_ui_language';
 
 export type LocaleCode = string;
@@ -29,24 +40,36 @@ export type LocaleDefinition = {
   englishName: string;
   formatLocale: string;
   direction: 'ltr' | 'rtl';
+  flag: string;
   catalog: TranslationCatalog;
 };
 
 const localeRegistry: LocaleDefinition[] = [
-  { code: 'en', nativeName: 'English', englishName: 'English', formatLocale: 'en-GB', direction: 'ltr', catalog: englishCatalog },
-  { code: 'de', nativeName: 'Deutsch', englishName: 'German', formatLocale: 'de-DE', direction: 'ltr', catalog: germanCatalog },
-  { code: 'fr', nativeName: 'Français', englishName: 'French', formatLocale: 'fr-FR', direction: 'ltr', catalog: frenchCatalog },
-  { code: 'es', nativeName: 'Español', englishName: 'Spanish', formatLocale: 'es-ES', direction: 'ltr', catalog: spanishCatalog },
-  { code: 'it', nativeName: 'Italiano', englishName: 'Italian', formatLocale: 'it-IT', direction: 'ltr', catalog: italianCatalog },
-  { code: 'pt', nativeName: 'Português', englishName: 'Portuguese', formatLocale: 'pt-PT', direction: 'ltr', catalog: portugueseCatalog },
-  { code: 'ja', nativeName: '日本語', englishName: 'Japanese', formatLocale: 'ja-JP', direction: 'ltr', catalog: japaneseCatalog },
-  { code: 'zh', nativeName: '中文', englishName: 'Chinese', formatLocale: 'zh-CN', direction: 'ltr', catalog: chineseCatalog },
-  { code: 'ru', nativeName: 'Русский', englishName: 'Russian', formatLocale: 'ru-RU', direction: 'ltr', catalog: russianCatalog },
-  { code: 'sv', nativeName: 'Svenska', englishName: 'Swedish', formatLocale: 'sv-SE', direction: 'ltr', catalog: swedishCatalog },
-  { code: 'tr', nativeName: 'Türkçe', englishName: 'Turkish', formatLocale: 'tr-TR', direction: 'ltr', catalog: turkishCatalog },
-  { code: 'ar', nativeName: 'العربية', englishName: 'Arabic', formatLocale: 'ar-SA', direction: 'rtl', catalog: arabicCatalog },
-  { code: 'th', nativeName: 'ไทย', englishName: 'Thai', formatLocale: 'th-TH', direction: 'ltr', catalog: thaiCatalog },
-  { code: 'ko', nativeName: '한국어', englishName: 'Korean', formatLocale: 'ko-KR', direction: 'ltr', catalog: koreanCatalog }
+  { code: 'en', nativeName: 'English', englishName: 'English', formatLocale: 'en-GB', direction: 'ltr', flag: '🇬🇧', catalog: englishCatalog },
+  { code: 'de', nativeName: 'Deutsch', englishName: 'German', formatLocale: 'de-DE', direction: 'ltr', flag: '🇩🇪', catalog: germanCatalog },
+  { code: 'fr', nativeName: 'Français', englishName: 'French', formatLocale: 'fr-FR', direction: 'ltr', flag: '🇫🇷', catalog: frenchCatalog },
+  { code: 'es', nativeName: 'Español', englishName: 'Spanish', formatLocale: 'es-ES', direction: 'ltr', flag: '🇪🇸', catalog: spanishCatalog },
+  { code: 'it', nativeName: 'Italiano', englishName: 'Italian', formatLocale: 'it-IT', direction: 'ltr', flag: '🇮🇹', catalog: italianCatalog },
+  { code: 'pt', nativeName: 'Português', englishName: 'Portuguese', formatLocale: 'pt-PT', direction: 'ltr', flag: '🇵🇹', catalog: portugueseCatalog },
+  { code: 'ja', nativeName: '日本語', englishName: 'Japanese', formatLocale: 'ja-JP', direction: 'ltr', flag: '🇯🇵', catalog: japaneseCatalog },
+  { code: 'zh', nativeName: '中文', englishName: 'Chinese', formatLocale: 'zh-CN', direction: 'ltr', flag: '🇨🇳', catalog: chineseCatalog },
+  { code: 'ru', nativeName: 'Русский', englishName: 'Russian', formatLocale: 'ru-RU', direction: 'ltr', flag: '🇷🇺', catalog: russianCatalog },
+  { code: 'sv', nativeName: 'Svenska', englishName: 'Swedish', formatLocale: 'sv-SE', direction: 'ltr', flag: '🇸🇪', catalog: swedishCatalog },
+  { code: 'tr', nativeName: 'Türkçe', englishName: 'Turkish', formatLocale: 'tr-TR', direction: 'ltr', flag: '🇹🇷', catalog: turkishCatalog },
+  { code: 'ar', nativeName: 'العربية', englishName: 'Arabic', formatLocale: 'ar-SA', direction: 'rtl', flag: '🇸🇦', catalog: arabicCatalog },
+  { code: 'th', nativeName: 'ไทย', englishName: 'Thai', formatLocale: 'th-TH', direction: 'ltr', flag: '🇹🇭', catalog: thaiCatalog },
+  { code: 'ko', nativeName: '한국어', englishName: 'Korean', formatLocale: 'ko-KR', direction: 'ltr', flag: '🇰🇷', catalog: koreanCatalog },
+  { code: 'hi', nativeName: 'हिन्दी', englishName: 'Hindi', formatLocale: 'hi-IN', direction: 'ltr', flag: '🇮🇳', catalog: hindiCatalog },
+  { code: 'bn', nativeName: 'বাংলা', englishName: 'Bengali', formatLocale: 'bn-BD', direction: 'ltr', flag: '🇧🇩', catalog: bengaliCatalog },
+  { code: 'id', nativeName: 'Bahasa Indonesia', englishName: 'Indonesian', formatLocale: 'id-ID', direction: 'ltr', flag: '🇮🇩', catalog: indonesianCatalog },
+  { code: 'ur', nativeName: 'اردو', englishName: 'Urdu', formatLocale: 'ur-PK', direction: 'rtl', flag: '🇵🇰', catalog: urduCatalog },
+  { code: 'mr', nativeName: 'मराठी', englishName: 'Marathi', formatLocale: 'mr-IN', direction: 'ltr', flag: '🇮🇳', catalog: marathiCatalog },
+  { code: 'te', nativeName: 'తెలుగు', englishName: 'Telugu', formatLocale: 'te-IN', direction: 'ltr', flag: '🇮🇳', catalog: teluguCatalog },
+  { code: 'ha', nativeName: 'Hausa', englishName: 'Hausa', formatLocale: 'ha-NG', direction: 'ltr', flag: '🇳🇬', catalog: hausaCatalog },
+  { code: 'pa', nativeName: 'پنجابی', englishName: 'Punjabi', formatLocale: 'pa-Arab-PK', direction: 'rtl', flag: '🇵🇰', catalog: punjabiCatalog },
+  { code: 'vi', nativeName: 'Tiếng Việt', englishName: 'Vietnamese', formatLocale: 'vi-VN', direction: 'ltr', flag: '🇻🇳', catalog: vietnameseCatalog },
+  { code: 'ta', nativeName: 'தமிழ்', englishName: 'Tamil', formatLocale: 'ta-IN', direction: 'ltr', flag: '🇮🇳', catalog: tamilCatalog },
+  { code: 'nl', nativeName: 'Nederlands', englishName: 'Dutch', formatLocale: 'nl-NL', direction: 'ltr', flag: '🇳🇱', catalog: dutchCatalog }
 ];
 
 const catalogs = new Map(localeRegistry.map(locale => [locale.code, locale.catalog]));
@@ -135,6 +158,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
                     onClick={() => setLocale(candidate.code)}
                     className={`min-h-14 rounded-lg border px-3 py-2 text-start transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${selected ? 'border-blue-600 bg-blue-50 text-blue-950' : 'border-slate-200 bg-white text-slate-800 hover:border-blue-300 hover:bg-slate-50'}`}
                   >
+                    <span className="mb-1 block text-xl leading-6" aria-hidden="true">{candidate.flag}</span>
                     <span className="block text-sm font-bold">{candidate.nativeName}</span>
                     <span className="block text-[11px] text-slate-500">{candidate.englishName}</span>
                   </button>

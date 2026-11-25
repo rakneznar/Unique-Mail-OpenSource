@@ -13,6 +13,7 @@ import {
   mailSearchFolderMatches,
   mailSearchTokens
 } from "./src/utils/mailSearch";
+import { normalizeProviderDomain, resolveMailProviderSettings } from "./src/utils/mailProviders";
 
 type SyncInboxRequest = {
   email: string;
@@ -215,60 +216,8 @@ function normalizeAddressList(value?: string) {
   return entries.join(", ");
 }
 
-function normalizeProviderDomain(domain: string) {
-  return (domain || "").trim().toLowerCase();
-}
-
 function localAutodiscoverSettings(email: string) {
-  const domain = normalizeProviderDomain(email.split("@")[1] || "");
-  if (domain === "mail.de") {
-    return {
-      imapServer: "imap.mail.de",
-      imapPort: 993,
-      smtpServer: "smtp.mail.de",
-      smtpPort: 587,
-      provider: "mail.de",
-      confidence: "preset",
-    };
-  }
-  if (domain === "inbox.lv" || domain === "inbox.eu" || domain.endsWith(".inbox.lv") || domain.endsWith(".inbox.eu")) {
-    return {
-      imapServer: "mail.inbox.lv",
-      imapPort: 993,
-      smtpServer: "mail.inbox.lv",
-      smtpPort: 587,
-      provider: "Inbox.lv / Inbox.eu",
-      confidence: "preset",
-    };
-  }
-  if (domain === "spacemail.com" || domain.endsWith(".spacemail.com") || domain === "spaceship.com" || domain.endsWith(".spaceship.com")) {
-    return {
-      imapServer: "mail.spacemail.com",
-      imapPort: 993,
-      smtpServer: "smtp.spacemail.com",
-      smtpPort: 465,
-      provider: "Spaceship Spacemail",
-      confidence: "preset",
-    };
-  }
-  if (domain.includes("privateemail.") || domain.includes("namecheap.")) {
-    return {
-      imapServer: "mail.privateemail.com",
-      imapPort: 993,
-      smtpServer: "mail.privateemail.com",
-      smtpPort: 465,
-      provider: "Namecheap Private Email",
-      confidence: "preset",
-    };
-  }
-  return {
-    imapServer: "imap." + domain,
-    imapPort: 993,
-    smtpServer: "smtp." + domain,
-    smtpPort: 465,
-    provider: (domain.split(".")[0] || "Web").toUpperCase() + " Mail-Dienst (Auto-Discovered)",
-    confidence: "fallback",
-  };
+  return resolveMailProviderSettings(email);
 }
 
 async function autodiscoverSettings(email: string) {
